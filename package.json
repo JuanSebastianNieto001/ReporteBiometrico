@@ -1,0 +1,23 @@
+{
+  "name": "reporte-biometrico",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automatización del reporte diario de llegadas tarde: HikCentral (Playwright) -> Excel -> confirmación local de la hora de entrada -> Gmail.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "probar": "node src/index.js --excel",
+    "explorar": "node scripts/explorar.js",
+    "correo:prueba": "node scripts/probar-correo.js",
+    "gmail:autorizar": "node scripts/autorizar-gmail.js",
+    "tarea": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/registrar-tarea.ps1",
+    "instalar-navegador": "npx playwright install chromium"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "nodemailer": "^10.0.0",
+    "playwright": "^1.63.0"
+  }
+}

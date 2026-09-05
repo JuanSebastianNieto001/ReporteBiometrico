@@ -1,0 +1,58 @@
+{
+  "biometrica": {
+    "url": "http://192.168.153.4/#/portal?home=accessControlHome",
+    "puntosAcceso": [
+      "Biometria 1",
+      "Biometria 2"
+    ],
+    "departamento": "Personal Claro Colombia",
+    "headless": true,
+    "navegador": "chrome",
+    "tiempoEsperaMs": 45000
+  },
+  "horarioHabitual": {
+    "lunes": "08:00",
+    "martes": "08:00",
+    "miercoles": "09:00",
+    "jueves": "08:00",
+    "viernes": "09:00",
+    "sabado": null,
+    "domingo": null
+  },
+  "excepcionesPorFecha": {},
+  "correo": {
+    "destinatarios": [
+      "correo1@empresa.com",
+      "correo2@empresa.com"
+    ],
+    "cc": [],
+    "nombreRemitente": "Soporte",
+    "asunto": "Reporte Biométrico {fecha}",
+    "saludo": "Buen día,\n\nSe envía reporte de biometría.",
+    "sinLlegadasTarde": "No se registran llegadas tarde para el día de hoy.",
+    "despedida": "",
+    "firmaHtml": "",
+    "metodo": "navegador",
+    "navegador": {
+      "headless": false
+    },
+    "adjuntarExcel": true
+  },
+  "confirmacion": {
+    "modo": "ntfy",
+    "puerto": 4545,
+    "abrirNavegador": true,
+    "notificacionWindows": true,
+    "esperaRespuestaHoras": 8
+  },
+  "ntfy": {
+    "servidor": "https://ntfy.sh",
+    "tema": "CAMBIA-ESTO-por-un-nombre-de-tema-largo-y-secreto",
+    "incluirNombres": false,
+    "avisarEnvios": true,
+    "token": ""
+  },
+  "programacion": {
+    "minutosDespuesDeEntrada": 45
+  }
+}

@@ -1,0 +1,12 @@
+node_modules/
+.env
+descargas/
+logs/
+.perfil-navegador/
+*.log
+gmail-oauth-cliente.json
+gmail-oauth-token.json
+.perfil-gmail/
+config.json
+1.Procedimiento_Reporte_Biometrico.docx
+*.docx
