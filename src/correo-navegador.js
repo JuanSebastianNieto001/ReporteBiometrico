@@ -142,15 +142,25 @@ async function adjuntarArchivos(page, adjuntos, log, captura) {
 }
 
 async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = [] }, log, captura) {
-  await cerrarPopups(page);
-  const redactar = page.getByRole('button', { name: /^\s*Redactar\s*$/ }).or(page.locator('div[gh="cm"]')).first();
-  await redactar.waitFor({ timeout: 30000 });
-  await redactar.click();
-  await page.waitForTimeout(2500);
+  // Abrir UNA sola ventana de redacción. Si ya hay un compose abierto (de un intento previo), se reutiliza;
+  // si no, se hace un clic en "Redactar" y se espera; solo se reintenta una vez para no apilar ventanas.
+  const subjectField = page.locator('input[name="subjectbox"]').first();
+  let abierto = await subjectField.isVisible().catch(() => false);
+  for (let intento = 1; intento <= 2 && !abierto; intento++) {
+    await cerrarPopups(page);
+    const redactar = page.getByRole('button', { name: /^\s*Redactar\s*$/ }).or(page.locator('div[gh="cm"]')).first();
+    await redactar.waitFor({ timeout: 30000 });
+    await redactar.click().catch(() => {});
+    abierto = await subjectField.waitFor({ state: 'visible', timeout: 15000 }).then(() => true).catch(() => false);
+    if (!abierto) log(`  La ventana de redacción no abrió (intento ${intento}); se reintenta una vez.`);
+  }
+  if (!abierto) throw new Error('No se abrió la ventana de redacción de Gmail.');
   await captura('gmail_04_compose');
 
-  const to = page.locator('input[aria-label="Para"], input[aria-label^="Para"], input[aria-label*="Destinatarios" i], input[aria-label^="To" i], textarea[name="to"]').first();
-  await to.waitFor({ timeout: 20000 });
+  const dialog = page.locator('div[role="dialog"]').filter({ has: page.locator('input[name="subjectbox"]') }).first();
+  const to = dialog.locator('input[aria-label="Para"], input[aria-label^="Para"], input[aria-label*="Destinatarios" i], input[aria-label^="To" i], input[peoplekit-id], textarea[name="to"]')
+    .or(page.locator('input[aria-label="Para"], input[aria-label^="Para"], input[aria-label*="Destinatarios" i], input[aria-label^="To" i], input[peoplekit-id], textarea[name="to"]')).first();
+  await to.waitFor({ state: 'visible', timeout: 20000 });
   await to.click();
   await to.type(para, { delay: 20 });
   await page.keyboard.press('Enter');
@@ -179,15 +189,16 @@ async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = 
   await adjuntarArchivos(page, adjuntos, log, captura);
 
   const enviar = page.locator('div[role="button"][aria-label^="Enviar"], div[role="button"][data-tooltip^="Enviar"]').first();
-  if (await enviar.count()) await enviar.click();
+  await enviar.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+  if (await enviar.count()) await enviar.click().catch(() => {});
   else await page.keyboard.press('Control+Enter');
-  await page.waitForTimeout(4000);
-  await captura('gmail_06_enviado');
 
-  const confirm = await textoCuerpo(page, 300);
-  const enviado = /Se envió el mensaje|Mensaje enviado|Se ha enviado|Enviado/i.test(confirm) || !(await page.locator('input[name="subjectbox"]').count());
-  if (!enviado) { await captura('gmail_07_sin_confirmar'); throw new Error('No se confirmó el envío en la interfaz de Gmail (revisa las capturas gmail_05/06/07).'); }
-  log('  Gmail confirmó el envío del mensaje.');
+  // Confirmar por el aviso "Se envió el mensaje" (Gmail lo muestra aunque los adjuntos terminen de subir después).
+  const toast = page.locator('text=/Se envió el mensaje|Mensaje enviado|Se ha enviado|Message sent/i').first();
+  const enviado = await toast.waitFor({ state: 'visible', timeout: 40000 }).then(() => true).catch(() => false);
+  await captura('gmail_06_enviado');
+  if (!enviado) { await captura('gmail_07_sin_confirmar'); throw new Error('No se confirmó el envío en la interfaz de Gmail (no apareció "Se envió el mensaje"). Revisa las capturas gmail_05/06/07.'); }
+  log('  Gmail confirmó el envío del mensaje ("Se envió el mensaje").');
 }
 
 async function enviarCorreoNavegador({ config, para, cc = [], asunto, texto, adjuntos = [], log = console.log }) {

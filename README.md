@@ -68,7 +68,7 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 "programacion": { "minutosDespuesDeEntrada": 45 },
 "correo": { "destinatarios": ["correo1@empresa.com", "correo2@empresa.com"], "cc": [], "asunto": "Reporte Biométrico {fecha}" },
 "confirmacion": { "modo": "inmediato", "esperaRespuestaHoras": 8 },
-"ntfy": { "servidor": "https://ntfy.sh", "tema": "reporte-biometrico-voz360-...", "incluirNombres": false, "avisarEnvios": true }
+"ntfy": { "servidor": "https://ntfy.sh", "tema": "TU-TEMA-LARGO-Y-SECRETO", "incluirNombres": false, "avisarEnvios": true }
 ```
 
 - `horarioHabitual`: hora de entrada que se propone cada día; `null` = sin horario fijo (se pide la hora).
