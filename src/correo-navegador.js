@@ -141,7 +141,7 @@ async function adjuntarArchivos(page, adjuntos, log, captura) {
   await captura('gmail_05b_adjunto');
 }
 
-async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = [] }, log, captura) {
+async function redactarYEnviar(page, { para, cc = [], asunto, texto, html, adjuntos = [], enviar = true }, log, captura) {
   // Abrir UNA sola ventana de redacción. Si ya hay un compose abierto (de un intento previo), se reutiliza;
   // si no, se hace un clic en "Redactar" y se espera; solo se reintenta una vez para no apilar ventanas.
   const subjectField = page.locator('input[name="subjectbox"]').first();
@@ -175,10 +175,40 @@ async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = 
   await body.click();
   // Colocar el cursor al inicio para que el texto quede ARRIBA de la firma automática de Gmail.
   await page.keyboard.press('Control+Home');
-  const lineas = texto.split('\n');
-  for (let i = 0; i < lineas.length; i++) {
-    if (lineas[i]) await body.type(lineas[i], { delay: 3 });
-    if (i < lineas.length - 1) await page.keyboard.press('Enter');
+
+  // El cuerpo se pega como HTML para que la tabla de nombres y horas quede alineada:
+  // escribiendolo como texto, la fuente proporcional de Gmail dejaba la columna despareja.
+  // Se hace con un evento 'paste' sintetico y no con execCommand('insertHTML'), porque Gmail
+  // aplica Trusted Types y lo rechaza ('This document requires TrustedHTML assignment').
+  // Tampoco se usa el portapapeles real para no pisar lo que el usuario tenga copiado.
+  // El DataTransfer lleva tambien el texto plano, por si Gmail prefiriera esa version.
+  // Si el pegado no prospera se escribe el texto plano, que siempre funciona.
+  let cuerpoHtml = false;
+  if (html) {
+    const largoAntes = (await body.innerText().catch(() => '')).length;
+    const insertado = await page.evaluate(({ h, t }) => {
+      const el = document.activeElement;
+      if (!el || !el.isContentEditable) return false;
+      try {
+        const dt = new DataTransfer();
+        dt.setData('text/html', h);
+        dt.setData('text/plain', t);
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        return true;
+      } catch (_) { return false; }
+    }, { h: html, t: texto }).catch(() => false);
+    await page.waitForTimeout(800);   // Gmail procesa el pegado de forma asincrona
+    const largoDespues = (await body.innerText().catch(() => '')).length;
+    cuerpoHtml = !!insertado && largoDespues > largoAntes;
+    if (cuerpoHtml) log('  Cuerpo insertado como tabla HTML: la columna de horas queda alineada.');
+    else log('  Gmail no acepto el cuerpo como HTML; se escribe como texto plano (columna menos pareja).');
+  }
+  if (!cuerpoHtml) {
+    const lineas = texto.split('\n');
+    for (let i = 0; i < lineas.length; i++) {
+      if (lineas[i]) await body.type(lineas[i], { delay: 3 });
+      if (i < lineas.length - 1) await page.keyboard.press('Enter');
+    }
   }
   // Separar el mensaje de la firma con una línea en blanco.
   await page.keyboard.press('Enter');
@@ -188,9 +218,17 @@ async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = 
   // Adjuntar archivos (p. ej. el Excel exportado) antes de enviar.
   await adjuntarArchivos(page, adjuntos, log, captura);
 
-  const enviar = page.locator('div[role="button"][aria-label^="Enviar"], div[role="button"][data-tooltip^="Enviar"]').first();
-  await enviar.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-  if (await enviar.count()) await enviar.click().catch(() => {});
+  // Modo borrador: queda todo escrito y adjuntado, pero NO se pulsa Enviar.
+  // Gmail guarda el borrador solo, asi que se puede revisar despues en la carpeta Borradores.
+  if (!enviar) {
+    await captura('gmail_06_borrador_sin_enviar');
+    log('  Borrador listo en Gmail: destinatarios, asunto, cuerpo y adjunto escritos. NO se pulso Enviar.');
+    return;
+  }
+
+  const botonEnviar = page.locator('div[role="button"][aria-label^="Enviar"], div[role="button"][data-tooltip^="Enviar"]').first();
+  await botonEnviar.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
+  if (await botonEnviar.count()) await botonEnviar.click().catch(() => {});
   else await page.keyboard.press('Control+Enter');
 
   // Confirmar por el aviso "Se envió el mensaje" (Gmail lo muestra aunque los adjuntos terminen de subir después).
@@ -201,7 +239,7 @@ async function redactarYEnviar(page, { para, cc = [], asunto, texto, adjuntos = 
   log('  Gmail confirmó el envío del mensaje ("Se envió el mensaje").');
 }
 
-async function enviarCorreoNavegador({ config, para, cc = [], asunto, texto, adjuntos = [], log = console.log }) {
+async function enviarCorreoNavegador({ config, para, cc = [], asunto, texto, html, adjuntos = [], log = console.log, enviar = true }) {
   const usuario = config.credenciales.gmail.webUsuario || config.credenciales.gmail.usuario;
   const clave = config.credenciales.gmail.webClave;
   if (!usuario) throw new Error('Falta GMAIL_WEB_USER (o GMAIL_USUARIO) en .env');
@@ -214,7 +252,7 @@ async function enviarCorreoNavegador({ config, para, cc = [], asunto, texto, adj
   const marca = marcaTiempoArchivo();
   const captura = async (n) => { try { await page.screenshot({ path: path.join(config.rutas.capturas, `${marca}_${n}.png`) }); } catch (_) {} };
 
-  log(`Enviando el correo por Gmail web (Playwright) como ${usuario} -> ${para.join(', ')}`);
+  log(`${enviar ? 'Enviando el correo' : 'Redactando el correo SIN enviarlo'} por Gmail web (Playwright) como ${usuario} -> ${para.join(', ')}`);
   const context = await chromium.launchPersistentContext(perfil, {
     channel: opciones.navegador || 'chrome',
     headless: opciones.headless === true,
@@ -228,15 +266,55 @@ async function enviarCorreoNavegador({ config, para, cc = [], asunto, texto, adj
     await iniciarSesionSiHaceFalta(page, usuario, clave, log, captura);
     await cerrarPopups(page);
     await verificarCuenta(page, usuario, log);
-    await redactarYEnviar(page, { para: para[0], cc: [...para.slice(1), ...cc], asunto, texto, adjuntos }, log, captura);
-    return { enviado: true, metodo: 'navegador', para, adjuntos };
+    await redactarYEnviar(page, { para: para[0], cc: [...para.slice(1), ...cc], asunto, texto, html, adjuntos, enviar }, log, captura);
+    return { enviado: enviar, borrador: !enviar, metodo: 'navegador', para, adjuntos };
   } catch (e) {
     await captura('gmail_99_error');
-    e.message = `Envío por Gmail web falló: ${e.message} | Capturas en ${config.rutas.capturas}`;
+    e.message = `${enviar ? 'Envío' : 'Redacción'} por Gmail web falló: ${e.message} | Capturas en ${config.rutas.capturas}`;
     throw e;
   } finally {
     await context.close().catch(() => {});
   }
 }
 
-module.exports = { enviarCorreoNavegador };
+// Verifica que el inicio de sesión en Gmail web funcione, SIN redactar ni enviar ningún correo.
+// Deja la sesión guardada en .perfil-gmail para que los envíos siguientes no vuelvan a pedir el login.
+async function verificarAccesoGmail({ config, log = console.log }) {
+  const usuario = config.credenciales.gmail.webUsuario || config.credenciales.gmail.usuario;
+  const clave = config.credenciales.gmail.webClave;
+  if (!usuario) throw new Error('Falta GMAIL_WEB_USER (o GMAIL_USUARIO) en .env');
+  if (!clave) throw new Error('Falta GMAIL_WEB_PASS en .env (contraseña de la cuenta para el envío por navegador).');
+
+  const opciones = (config.correo && config.correo.navegador) || {};
+  const perfil = path.join(config.rutas.raiz, '.perfil-gmail');
+  fs.mkdirSync(perfil, { recursive: true });
+  const marca = marcaTiempoArchivo();
+  const captura = async (n) => { try { await page.screenshot({ path: path.join(config.rutas.capturas, `${marca}_${n}.png`) }); } catch (_) {} };
+
+  log(`Verificando acceso a Gmail web como ${usuario} (no se enviará ningún correo)`);
+  const context = await chromium.launchPersistentContext(perfil, {
+    channel: opciones.navegador || 'chrome',
+    headless: opciones.headless === true,
+    viewport: { width: 1360, height: 900 },
+    locale: 'es-CO',
+    args: ['--disable-blink-features=AutomationControlled'],
+  });
+  const page = context.pages()[0] || await context.newPage();
+  page.setDefaultTimeout((config.correo.navegador && config.correo.navegador.tiempoEsperaMs) || 45000);
+  try {
+    await iniciarSesionSiHaceFalta(page, usuario, clave, log, captura);
+    await cerrarPopups(page);
+    await verificarCuenta(page, usuario, log);
+    await captura('gmail_00_acceso_ok');
+    log('  Acceso correcto: se llegó a la bandeja de Gmail y la sesión quedó guardada en .perfil-gmail');
+    return { acceso: true, usuario, perfil };
+  } catch (e) {
+    await captura('gmail_98_acceso_error');
+    e.message = `No se pudo entrar a Gmail web: ${e.message} | Capturas en ${config.rutas.capturas}`;
+    throw e;
+  } finally {
+    await context.close().catch(() => {});
+  }
+}
+
+module.exports = { enviarCorreoNavegador, verificarAccesoGmail };

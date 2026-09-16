@@ -17,8 +17,13 @@ function construirCorreo({ fecha, tardes, config }) {
   const saludo = c.saludo || 'Buen día,\n\nSe envía reporte de biometría.';
   const filas = tardes.map(p => ({ nombre: p.nombre, hora: segundosAHora(p.primeraSeg, { ceroInicial: false }) }));
 
+  // Las horas se alinean en columna rellenando el nombre con espacios hasta el mas largo,
+  // en vez de una tabulacion (Gmail aplicaba los tabuladores segun el ancho de cada nombre
+  // y las horas quedaban desparejas). Con fuente monoespaciada la columna queda exacta;
+  // con la proporcional que Gmail usa por defecto queda aproximada, pero pareja.
+  const anchoNombre = filas.reduce((max, f) => Math.max(max, f.nombre.length), 0);
   const lineas = filas.length
-    ? filas.map(f => `${f.nombre}\t${f.hora}`).join('\n')
+    ? filas.map(f => `${f.nombre.padEnd(anchoNombre + 2)}${f.hora}`).join('\n')
     : (c.sinLlegadasTarde || 'No se registran llegadas tarde para el día de hoy.');
 
   const texto = [saludo, '', lineas, c.despedida ? `\n${c.despedida}` : ''].join('\n').trimEnd() + '\n';

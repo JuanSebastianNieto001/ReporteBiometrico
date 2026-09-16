@@ -61,7 +61,14 @@ foreach ($k in ($grupos.Keys | Sort-Object)) {
   $triggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $grupos[$k] -At $k
 }
 $Accion = New-ScheduledTaskAction -Execute $Node -Argument "src\index.js" -WorkingDirectory $Raiz
-$Config = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 12) -MultipleInstances IgnoreNew
+# -StartWhenAvailable: si el equipo estaba apagado a la hora del disparador, corre al encenderlo.
+# -WakeToRun: despierta el equipo si alguien vuelve a activar la suspension (deberia estar en 'Nunca').
+# -ExecutionTimeLimit 12 h: cubre la espera de la respuesta por ntfy (confirmacion.esperaRespuestaHoras).
+# Las opciones de bateria evitan que Windows se niegue a arrancar o corte la tarea si el equipo
+# queda alimentado por un UPS que se reporta como bateria.
+# A PROPOSITO no se configura reintento automatico: cada reintento repetiria el inicio de sesion en
+# HikCentral, que bloquea la IP tras 4 intentos fallidos. Si falla, se revisa el log y se corre a mano.
+$Config = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 12) -MultipleInstances IgnoreNew
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $Nombre -Action $Accion -Trigger $triggers -Settings $Config -Principal $Principal -Force | Out-Null

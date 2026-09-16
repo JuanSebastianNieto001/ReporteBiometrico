@@ -11,7 +11,8 @@
     "correo:prueba": "node scripts/probar-correo.js",
     "gmail:autorizar": "node scripts/autorizar-gmail.js",
     "tarea": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/registrar-tarea.ps1",
-    "instalar-navegador": "npx playwright install chromium"
+    "instalar-navegador": "npx playwright install chromium",
+    "gmail:probar": "node scripts/probar-gmail.js"
   },
   "license": "UNLICENSED",
   "dependencies": {

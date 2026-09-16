@@ -97,6 +97,7 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 | `node src\index.js --modo ntfy` | Prueba el modo ntfy hoy mismo. |
 | `npm run probar -- ejemplos\Busqueda_de_acceso_de_persona_ejemplo.xlsx --fecha 2026-09-03 --hora 09:00 --sin-enviar` | Sin navegador ni correo: muestra exactamente qué enviaría con los datos del 3/09/2026. |
 | `npm run correo:prueba` | Envía un correo `[PRUEBA]` a los destinatarios (o a uno pasado como parámetro). |
+| `npm run gmail:probar` | Comprueba el inicio de sesión en Gmail web **sin enviar nada** y deja la sesión guardada en `.perfil-gmail`. |
 | `npm run explorar` | Solo la biométrica, con el navegador visible y en cámara lenta; capturas en `logs\capturas\`. |
 | `npm run tarea` | Registra la tarea programada de Windows (ver abajo). |
 

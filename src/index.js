@@ -7,6 +7,7 @@
 //   --excel <ruta.xlsx>                     usa un Excel ya exportado (pruebas, sin navegador)
 //   --fecha AAAA-MM-DD                      fecha del reporte (solo tiene sentido con --excel)
 //   --sin-enviar                            no envía el correo: solo muestra lo que enviaría
+//   --solo-redactar                         abre Gmail y deja el correo redactado y adjuntado, pero NO pulsa Enviar
 //   --sin-abrir / --sin-notificar           (modo pagina) no abre el navegador / sin aviso de Windows
 //
 // Modos:
@@ -37,6 +38,7 @@ function argumentos() {
     hora: obtener('--hora'),
     modo: obtener('--modo'),
     sinEnviar: a.includes('--sin-enviar'),
+    soloRedactar: a.includes('--solo-redactar'),
     sinAbrir: a.includes('--sin-abrir'),
     sinNotificar: a.includes('--sin-notificar'),
   };
@@ -103,14 +105,19 @@ async function main() {
     if (!para.length) throw new Error('No hay destinatarios (config.json > correo.destinatarios)');
     const adjuntos = (config.correo.adjuntarExcel !== false && rutaExcel && fs.existsSync(rutaExcel)) ? [rutaExcel] : [];
     log(`Correo "${correo.asunto}" para ${para.join(', ')} | hora de entrada ${h} | ${tardes.length} llegada(s) tarde: ${tardes.map(t => t.nombre).join('; ') || '(ninguna)'}${adjuntos.length ? ` | adjunto: ${path.basename(adjuntos[0])}` : ' | sin adjunto'}`);
-    if (args.sinEnviar) {
+    if (args.sinEnviar && !args.soloRedactar) {
       log('--sin-enviar: NO se envía. Contenido del correo:\n' + correo.texto);
       return { hora: h, tardes, correo, para, adjuntos, simulado: true };
     }
     const metodo = (config.correo.metodo || 'smtp').toLowerCase();
+    if (args.soloRedactar && metodo !== 'navegador') throw new Error(`--solo-redactar solo funciona con correo.metodo = "navegador" (ahora es "${metodo}"), porque necesita la interfaz web de Gmail.`);
     let r;
     if (metodo === 'navegador') {
-      r = await enviarCorreoNavegador({ config, para, cc, asunto: correo.asunto, texto: correo.texto, adjuntos, log });
+      r = await enviarCorreoNavegador({ config, para, cc, asunto: correo.asunto, texto: correo.texto, html: correo.html, adjuntos, log, enviar: !args.soloRedactar });
+      if (args.soloRedactar) {
+        log('--solo-redactar: el correo quedó REDACTADO en Gmail pero NO se envió. Revísalo en Borradores y bórralo cuando termines.');
+        return { hora: h, tardes, correo, para, adjuntos, resultado: r, simulado: true };
+      }
       log('Correo enviado por Gmail web (navegador).');
     } else {
       r = await enviarCorreo({ para, cc, asunto: correo.asunto, texto: correo.texto, html: correo.html, adjuntos, config });

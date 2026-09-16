@@ -255,9 +255,31 @@ async function exportarExcel({ config, log, fecha }) {
     log(`Paso 1: abriendo ${urlBase(bio.url)} e iniciando sesión como "${cred.usuario}"`);
     await page.goto(urlBase(bio.url), { waitUntil: 'domcontentloaded' });
     const campoUsuario = page.getByPlaceholder('Nombre de usuario');
+    const campoClave = page.getByPlaceholder('Contraseña');
     await campoUsuario.waitFor();
-    await campoUsuario.fill(cred.usuario);
-    await page.getByPlaceholder('Contraseña').fill(cred.clave);
+
+    // El formulario de HikCentral (Vue) a veces borra lo escrito en "Nombre de usuario" justo después de
+    // escribirlo, cuando aparece el aviso del usuario de dominio; entonces se enviaba vacío y la página
+    // respondía "No puede estar vacío". Por eso se comprueba que AMBOS campos conservaron su valor ANTES
+    // de pulsar "Iniciar sesión": volver a escribir no cuenta como intento, enviar el formulario sí.
+    let camposListos = false;
+    for (let intento = 1; intento <= 4 && !camposListos; intento++) {
+      await campoUsuario.click();
+      await campoUsuario.fill('');
+      await campoUsuario.type(cred.usuario, { delay: 30 });
+      await campoClave.click();
+      await campoClave.fill('');
+      await campoClave.type(cred.clave, { delay: 30 });
+      await page.waitForTimeout(400);
+      const usuarioEscrito = await campoUsuario.inputValue().catch(() => '');
+      const largoClave = (await campoClave.inputValue().catch(() => '')).length;
+      camposListos = usuarioEscrito === cred.usuario && largoClave === cred.clave.length;
+      if (!camposListos) log(`  El formulario no conservó lo escrito (intento ${intento} de 4); se vuelve a escribir. Esto NO consume un intento de inicio de sesión.`);
+    }
+    if (!camposListos) {
+      await captura('01_login_campos_vacios');
+      throw new Error('No se pudieron escribir usuario y contraseña en el formulario de HikCentral: el campo se limpia solo. NO se envió ningún intento de inicio de sesión, así que no hay riesgo de bloqueo de IP. Revisa la captura 01_login_campos_vacios.');
+    }
     await page.locator('button.login-btn').click();
     const resultadoLogin = await Promise.race([
       page.locator('.el-dialog, .el-message-box').filter({ hasText: RE_ERROR_LOGIN }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
