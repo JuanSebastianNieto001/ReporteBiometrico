@@ -20,7 +20,7 @@ del procedimiento (mismas 11 personas, mismo orden, misma hora del que aparecía
 | Modo | Qué hace | Para qué |
 | --- | --- | --- |
 | `inmediato` | Calcula con la hora habitual (o `--hora`) y envía de una vez. | Pruebas (estado actual). |
-| `ntfy` | Manda una notificación al celular (app **ntfy**): *"¿La hora de entrada de hoy fue 08:00?"* con botones **Sí, enviar** / **No, otra hora**. Con Sí envía. Con No pregunta la hora real; al escribirla recalcula y envía (si aún no han pasado 45 min desde esa hora, espera y vuelve a consultar la biométrica). También acepta escribir directamente una hora o `cancelar`. | Operación diaria desde el lunes. |
+| `ntfy` | Manda una notificación al celular (app **ntfy**): *"¿La hora de entrada de hoy fue 08:00?"* con botones **Sí, enviar** / **No, otra hora**. Con Sí envía. Con No pregunta la hora real; al escribirla recalcula y envía (al indicar otra hora SIEMPRE se vuelve a consultar la biométrica, esperando primero si aún no han pasado 30 min desde esa hora). También acepta escribir directamente una hora o `cancelar`. | Operación diaria desde el lunes. |
 | `pagina` | Aviso de Windows y página local `http://127.0.0.1:4545` con la hora propuesta editable, la lista de llegadas tarde (con casillas para excluir) y vista previa. Envía solo al presionar *Confirmar hora y enviar correo*. | Cuando estás frente al computador. |
 
 ## Configuración
@@ -63,7 +63,7 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 ### 2. `config.json`
 
 ```json
-"horarioHabitual": { "lunes": "08:00", "martes": "08:00", "miercoles": "09:00", "jueves": "08:00", "viernes": "09:00", "sabado": null, "domingo": null },
+"horarioHabitual": { "lunes": "08:00", "martes": "08:00", "miercoles": "09:00", "jueves": "09:00", "viernes": "09:00", "sabado": null, "domingo": null },
 "excepcionesPorFecha": { "2026-09-12": "09:00" },
 "programacion": { "minutosDespuesDeEntrada": 45 },
 "correo": { "destinatarios": ["correo1@empresa.com", "correo2@empresa.com"], "cc": [], "asunto": "Reporte Biométrico {fecha}" },
@@ -73,7 +73,7 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 
 - `horarioHabitual`: hora de entrada que se propone cada día; `null` = sin horario fijo (se pide la hora).
 - `excepcionesPorFecha`: cambios puntuales ya conocidos; tienen prioridad sobre el habitual.
-- `programacion.minutosDespuesDeEntrada`: el reporte se ejecuta 45 min después de la hora de entrada (tarea programada) y es el tiempo que espera si por ntfy se indica una hora posterior.
+- `programacion.minutosDespuesDeEntrada`: el reporte se ejecuta 30 min después de la hora de entrada (tarea programada) y es el tiempo que espera si por ntfy se indica una hora posterior.
 - `correo.destinatarios`: hoy está el correo de prueba; cámbialo por los reales antes del lunes. `{fecha}` en el asunto se reemplaza por la fecha (ej. `3/09/2026`).
   `saludo`, `sinLlegadasTarde`, `despedida` y `firmaHtml` completan el mensaje.
 - `correo.adjuntarExcel`: `true` (por defecto) adjunta al correo el Excel exportado desde `descargas\`. Ponlo en `false` para enviar solo el texto.
@@ -103,10 +103,10 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 
 Parámetros de `node src\index.js`: `--modo`, `--hora HH:MM`, `--excel <ruta>`, `--fecha AAAA-MM-DD`, `--sin-enviar` (simula), `--sin-abrir`, `--sin-notificar`.
 
-## Programar la ejecución diaria (45 min después de la hora de entrada)
+## Programar la ejecución diaria (30 min después de la hora de entrada)
 
 ```powershell
-npm run tarea                                 # 08:45 lunes/martes/jueves y 09:45 miércoles/viernes, según config.json
+npm run tarea                                 # 08:30 lunes/martes y 09:30 miércoles/jueves/viernes, según config.json
 .\scripts\registrar-tarea.ps1 -Mostrar        # solo muestra el horario calculado
 .\scripts\registrar-tarea.ps1 -Eliminar       # quita la tarea
 ```

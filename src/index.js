@@ -241,12 +241,14 @@ async function main() {
       const limiteSeg = horaASegundos(nueva) + minutos * 60;
       const ahora = new Date();
       const ahoraSeg = ahora.getHours() * 3600 + ahora.getMinutes() * 60 + ahora.getSeconds();
-      // Los datos solo sirven si se consultaron DESPUES de la hora de entrada mas el margen: si son
-      // anteriores, quien llego tarde todavia no habia marcado y el reporte sale vacio. No basta con
-      // mirar el reloj: el 17/09/2026 se respondio "9:00" a las 9:32 (pasado el limite de 9:30) y se
-      // envio un reporte de 0 llegadas tarde calculado con datos consultados a las 8:31. Eran 14.
-      const datosAnterioresAlLimite = momentoConsultaSeg === null || momentoConsultaSeg < limiteSeg;
-      if (!args.excel && aISO(ahora) === fechaISO && datosAnterioresAlLimite) {
+      // Si la hora de entrada se cambia desde ntfy SIEMPRE se vuelve a consultar la biometrica antes
+      // de enviar, sin excepciones: los datos que hay se pidieron pensando en otra hora de entrada y
+      // pueden ser anteriores a la real, con lo que quien llego tarde todavia no habia marcado.
+      // El 17/09/2026 se respondio "9:00" a las 9:32 y salio un reporte de 0 llegadas tarde calculado
+      // con datos de las 8:31; las reales eran 14. Una consulta de mas cuesta un minuto, un reporte
+      // incompleto va a gerencia y hay que corregirlo.
+      // Solo se omite con --excel (no hay biometrica que consultar) o si el reporte no es de hoy.
+      if (!args.excel && aISO(ahora) === fechaISO) {
         if (ahoraSeg < limiteSeg) {
           const esperaMs = (limiteSeg - ahoraSeg) * 1000;
           await avisoNtfy(titulo, `Entendido: hora de entrada ${nueva}. Volveré a consultar la biométrica a las ${segundosAHora(limiteSeg, { conSegundos: false })} (${minutos} min después) y enviaré el reporte.`, { prioridad: 3 });
@@ -254,8 +256,8 @@ async function main() {
           await dormir(esperaMs);
         } else {
           const consultadoA = momentoConsultaSeg === null ? '(desconocido)' : segundosAHora(momentoConsultaSeg, { conSegundos: false });
-          await avisoNtfy(titulo, `Entendido: hora de entrada ${nueva}. Los datos son de las ${consultadoA}, anteriores a esa hora, así que vuelvo a consultar la biométrica antes de enviar.`, { prioridad: 3 });
-          log(`Hora ${nueva} recibida. Los datos se consultaron a las ${consultadoA}, antes del límite ${segundosAHora(limiteSeg, { conSegundos: false })}: se vuelve a consultar la biométrica para no reportar de menos.`);
+          await avisoNtfy(titulo, `Entendido: hora de entrada ${nueva}. Vuelvo a consultar la biométrica (los datos actuales son de las ${consultadoA}) y enseguida envío el reporte.`, { prioridad: 3 });
+          log(`Hora ${nueva} recibida (los datos actuales son de las ${consultadoA}). Se vuelve a consultar la biométrica antes de enviar, porque la hora de entrada cambió.`);
         }
         ({ rutaExcel, personas } = await obtenerPersonas());
       } else {
