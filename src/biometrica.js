@@ -20,6 +20,10 @@ const { marcaTiempoArchivo, aISO } = require('./fechas');
 
 const RE_ERROR_LOGIN = /Nombre de usuario o contraseña incorrectos|Código de error|bloquear/i;
 const RE_PISTA = /componente web|control web|plugin/i;
+// Aviso posterior al login correcto: "Su contraseña de acceso caducará en N días... la cuenta se
+// bloqueará hasta que cambie su contraseña" (botones Cambiar contraseña / Ignorar). Contiene la palabra
+// "bloqueará", que RE_ERROR_LOGIN da por rechazo, así que hay que excluirlo antes de comparar.
+const RE_CADUCA = /contraseña.{0,40}caducar|cambie su contraseña/i;
 const RE_RESPUESTA_BUSQUEDA = /CardSwipeRecords\?MT=GET/;
 
 function urlBase(url) {
@@ -59,9 +63,20 @@ async function textoDialogos(page) {
   ).catch(() => '');
 }
 
-// Cierra el modal "Pista" del componente web (Instálelo / Iniciar / Cancelar) y el aviso de "actualizar los datos".
+// Cierra el modal "Pista" del componente web (Instálelo / Iniciar / Cancelar), el aviso de caducidad de
+// la contraseña (Cambiar contraseña / Ignorar) y el aviso de "actualizar los datos".
 async function cerrarAvisos(page, log) {
-  const r = { pista: false, tip: false };
+  const r = { pista: false, tip: false, caduca: false };
+  const caduca = page.locator('.el-dialog:visible, .el-message-box:visible').filter({ hasText: RE_CADUCA }).first();
+  if (await caduca.isVisible().catch(() => false)) {
+    const ignorar = caduca.locator('button').filter({ hasText: /^\s*Ignorar\s*$/ }).first();
+    if (await ignorar.isVisible().catch(() => false)) {
+      await ignorar.click();
+      log('  Aviso de caducidad de la contraseña cerrado con "Ignorar". OJO: hay que cambiar la clave de HikCentral antes de que caduque o la cuenta se bloquea.');
+      r.caduca = true;
+      await page.waitForTimeout(400);
+    }
+  }
   const modal = page.locator('.el-dialog:visible, .el-message-box:visible').filter({ hasText: RE_PISTA }).first();
   if (await modal.isVisible().catch(() => false)) {
     const cancelar = modal.locator('button').filter({ hasText: /^\s*Cancelar\s*$/ }).first();
@@ -282,7 +297,7 @@ async function exportarExcel({ config, log, fecha }) {
     }
     await page.locator('button.login-btn').click();
     const resultadoLogin = await Promise.race([
-      page.locator('.el-dialog, .el-message-box').filter({ hasText: RE_ERROR_LOGIN }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
+      page.locator('.el-dialog, .el-message-box').filter({ hasText: RE_ERROR_LOGIN }).filter({ hasNotText: RE_CADUCA }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
       page.locator('text=/^\\s*Control de acceso\\s*$/').filter({ visible: true }).first().waitFor().then(() => 'ok').catch(() => 'timeout'),
     ]);
     if (resultadoLogin !== 'ok') {
