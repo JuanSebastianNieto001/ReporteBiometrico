@@ -20,6 +20,7 @@ const { marcaTiempoArchivo, aISO } = require('./fechas');
 
 const RE_ERROR_LOGIN = /Nombre de usuario o contraseña incorrectos|Código de error|bloquear/i;
 const RE_PISTA = /componente web|control web|plugin/i;
+const RE_CLAVE_CADUCA = /caducará|caducar|cambie su contraseña/i;
 const RE_RESPUESTA_BUSQUEDA = /CardSwipeRecords\?MT=GET/;
 
 function urlBase(url) {
@@ -281,10 +282,25 @@ async function exportarExcel({ config, log, fecha }) {
       throw new Error('No se pudieron escribir usuario y contraseña en el formulario de HikCentral: el campo se limpia solo. NO se envió ningún intento de inicio de sesión, así que no hay riesgo de bloqueo de IP. Revisa la captura 01_login_campos_vacios.');
     }
     await page.locator('button.login-btn').click();
-    const resultadoLogin = await Promise.race([
-      page.locator('.el-dialog, .el-message-box').filter({ hasText: RE_ERROR_LOGIN }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
+    // HikCentral avisa "Su contraseña de acceso caducará en N día/s" con botones Cambiar contraseña / Ignorar.
+    // No es un fallo de inicio de sesión (su texto "se bloqueará" coincide con RE_ERROR_LOGIN): se ignora y se continúa.
+    const ignorarAvisoCaducidad = async () => {
+      const aviso = page.locator('.el-dialog:visible, .el-message-box:visible').filter({ hasText: RE_CLAVE_CADUCA }).first();
+      if (!(await aviso.isVisible().catch(() => false))) return false;
+      const ignorar = aviso.locator('button').filter({ hasText: /Ignorar/i }).first();
+      if (!(await ignorar.isVisible().catch(() => false))) return false;
+      const texto = ((await aviso.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim();
+      await ignorar.click();
+      log(`  Aviso de caducidad de la contraseña ignorado: ${texto.slice(0, 140)}`);
+      await page.waitForTimeout(500);
+      return true;
+    };
+    const esperarLogin = () => Promise.race([
+      page.locator('.el-dialog:visible, .el-message-box:visible').filter({ hasText: RE_ERROR_LOGIN }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
       page.locator('text=/^\\s*Control de acceso\\s*$/').filter({ visible: true }).first().waitFor().then(() => 'ok').catch(() => 'timeout'),
     ]);
+    let resultadoLogin = await esperarLogin();
+    if (resultadoLogin !== 'ok' && await ignorarAvisoCaducidad()) resultadoLogin = await esperarLogin();
     if (resultadoLogin !== 'ok') {
       await captura('01_login_error');
       const detalle = (await textoDialogos(page)) || 'sin detalle (no cargó el menú principal)';
