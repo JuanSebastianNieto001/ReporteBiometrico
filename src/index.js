@@ -22,7 +22,7 @@ const config = require('./config');
 const { iniciar: iniciarLog, log } = require('./log');
 const { leerRegistros } = require('./excel');
 const { horaEntradaHabitual, agruparPorPersona, calcularLlegadasTarde } = require('./reporte');
-const { construirCorreo, enviarCorreo } = require('./correo');
+const { construirCorreo, enviarCorreo, asuntoCorreo } = require('./correo');
 const { enviarCorreoNavegador } = require('./correo-navegador');
 const { iniciarServidorConfirmacion } = require('./confirmar');
 const { toastWindows, abrirNavegador } = require('./notificar');
@@ -45,6 +45,27 @@ function argumentos() {
 }
 
 const dormir = ms => new Promise(r => setTimeout(r, ms));
+
+// Hay días con varios reportes (uno por hora de entrada, cada uno con su tarea programada). Si
+// coinciden (equipo encendido tarde, respuestas por ntfy al mismo tiempo) no pueden usar a la vez
+// la biométrica ni el perfil de Gmail (.perfil-gmail no admite dos navegadores): se turnan con un
+// archivo candado. Un candado de más de 15 min se da por abandonado (proceso que murió).
+async function conCandado(nombre, fn) {
+  const ruta = path.join(config.rutas.logs, `.${nombre}.lock`);
+  let avisado = false;
+  for (;;) {
+    try {
+      fs.writeFileSync(ruta, String(process.pid), { flag: 'wx' });
+      break;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      try { if (Date.now() - fs.statSync(ruta).mtimeMs > 15 * 60 * 1000) { fs.unlinkSync(ruta); continue; } } catch (_) { continue; }
+      if (!avisado) { log(`  Otro reporte está usando ${nombre}; esperando turno...`); avisado = true; }
+      await dormir(5000);
+    }
+  }
+  try { return await fn(); } finally { try { fs.unlinkSync(ruta); } catch (_) { /* ignorar */ } }
+}
 const ntfyConfigurado = () => !!(config.ntfy && config.ntfy.tema && !/X{4,}/.test(config.ntfy.tema));
 
 async function avisoNtfy(titulo, mensaje, extra = {}) {
@@ -75,7 +96,7 @@ async function main() {
       log(`Usando Excel existente: ${rutaExcel}`);
     } else {
       const { exportarExcel } = require('./biometrica');
-      rutaExcel = await exportarExcel({ config, log, fecha });
+      rutaExcel = await conCandado('biometrica', () => exportarExcel({ config, log, fecha }));
       const ahoraConsulta = new Date();
       momentoConsultaSeg = ahoraConsulta.getHours() * 3600 + ahoraConsulta.getMinutes() * 60 + ahoraConsulta.getSeconds();
     }
@@ -104,7 +125,7 @@ async function main() {
     const h = normalizarHoraEntrada(hora);
     if (!h) throw new Error(`Hora de entrada inválida: "${hora}"`);
     const tardes = calcularLlegadasTarde(personas, h, excluidos);
-    const correo = construirCorreo({ fecha, tardes, config });
+    const correo = construirCorreo({ fecha, tardes, config, hora: h });
     if (asunto && asunto.trim()) correo.asunto = asunto.trim();
     const para = destinatarios && destinatarios.length ? destinatarios : (config.correo.destinatarios || []);
     if (!para.length) throw new Error('No hay destinatarios (config.json > correo.destinatarios)');
@@ -118,7 +139,7 @@ async function main() {
     if (args.soloRedactar && metodo !== 'navegador') throw new Error(`--solo-redactar solo funciona con correo.metodo = "navegador" (ahora es "${metodo}"), porque necesita la interfaz web de Gmail.`);
     let r;
     if (metodo === 'navegador') {
-      r = await enviarCorreoNavegador({ config, para, cc, asunto: correo.asunto, texto: correo.texto, html: correo.html, adjuntos, log, enviar: !args.soloRedactar });
+      r = await conCandado('gmail', () => enviarCorreoNavegador({ config, para, cc, asunto: correo.asunto, texto: correo.texto, html: correo.html, adjuntos, log, enviar: !args.soloRedactar }));
       if (args.soloRedactar) {
         log('--solo-redactar: el correo quedó REDACTADO en Gmail pero NO se envió. Revísalo en Borradores y bórralo cuando termines.');
         return { hora: h, tardes, correo, para, adjuntos, resultado: r, simulado: true };
@@ -159,7 +180,7 @@ async function main() {
     const cfgN = config.ntfy;
     const horasEspera = config.confirmacion.esperaRespuestaHoras || 8;
     const fin = Date.now() + horasEspera * 3600 * 1000;
-    const titulo = `Reporte biométrico ${fechaCorreo(fecha)}`;
+    const titulo = `Reporte biométrico ${fechaCorreo(fecha)}${propuesta.hora ? ` (entrada ${propuesta.hora})` : ''}`;
     let desde = Math.floor(Date.now() / 1000) - 2;
     let hora = propuesta.hora;
     const resumenCon = (h) => { const t = calcularLlegadasTarde(personas, h); return `${t.length} llegada(s) tarde de ${personas.length} persona(s) con marcación` + (cfgN.incluirNombres && t.length ? ':\n' + textoTardes(t) : ''); };
@@ -167,9 +188,11 @@ async function main() {
     if (hora) {
       await ntfy.publicar(cfgN, {
         titulo,
-        mensaje: `¿La hora de entrada del ${nombreDia(fecha)} ${fechaCorreo(fecha)} fue ${hora}?\n${resumenCon(hora)}\n\nToca un botón, o escribe otra hora (ej. 8:30) o "cancelar".`,
+        mensaje: `Reporte con hora de entrada ${hora} del ${nombreDia(fecha)} ${fechaCorreo(fecha)}: ¿se envía?\n${resumenCon(hora)}\n\nToca un botón, o escribe "cancelar".`,
         prioridad: 4, etiquetas: ['clipboard'],
-        acciones: [ntfy.botonRespuesta(cfgN, `Sí, enviar con ${hora}`, 'si'), ntfy.botonRespuesta(cfgN, 'No, otra hora', 'no')],
+        // Los botones llevan la hora ("si 09:00") porque puede haber otro reporte del día esperando
+        // respuesta en el mismo tema; así cada uno toma solo la suya.
+        acciones: [ntfy.botonRespuesta(cfgN, `Sí, enviar con ${hora}`, `si ${hora}`), ntfy.botonRespuesta(cfgN, 'No, otra hora', `no ${hora}`)],
       });
       log(`ntfy: pregunta enviada al tema "${cfgN.tema}" con hora propuesta ${hora}. Esperando respuesta hasta ${horasEspera} h...`);
     } else {
@@ -186,6 +209,18 @@ async function main() {
     const esNo = t => /^no\b/i.test(t);
     const esCancelar = t => /^cancel/i.test(t);
     const esHora = t => normalizarHoraEntrada(limpiarHora(t)) != null;
+    // Con varios reportes del día esperando en el mismo tema: los botones mandan "si 09:00" / "no 09:00"
+    // y cada reporte ignora en silencio los de otra hora. Una hora escrita a mano solo la toma el
+    // reporte al que se le respondió "No" (o el que no tiene hora propuesta); "si"/"cancelar" sin
+    // hora los toman todos los que estén esperando.
+    const etiqueta = propuesta.hora;
+    let esperandoHora = !hora;
+    const deOtroReporte = t => {
+      const m = t.match(/^(\S+)\s+(\d{1,2}:\d{2})$/);
+      return !!(m && (esSi(m[1]) || esNo(m[1])) && normalizarHoraEntrada(m[2]) !== etiqueta);
+    };
+    const sinEtiqueta = t => t.replace(/^(\S+)\s+\d{1,2}:\d{2}$/, (x, p) => (esSi(p) || esNo(p) ? p : x));
+    const aceptada = t => !deOtroReporte(t) && (esSi(t) || esNo(t) || esCancelar(t) || (esperandoHora && esHora(t)));
 
     async function enviarYAvisar(h) {
       try {
@@ -205,10 +240,12 @@ async function main() {
       const resp = await ntfy.esperarRespuesta(cfgN, {
         desdeUnix: desde,
         timeoutMs: Math.max(1000, fin - Date.now()),
-        filtro: t => esSi(t) || esNo(t) || esCancelar(t) || esHora(t),
+        filtro: aceptada,
         alDescartar: async (t) => {
+          if (deOtroReporte(t)) return;
+          if (esHora(t)) { log(`ntfy: hora "${t}" ignorada: este reporte (${etiqueta}) no la pidió (hay que tocar antes "No, otra hora")`); return; }
           log(`ntfy: respuesta no reconocida "${t}"`);
-          await avisoNtfy(titulo, `No entendí "${t}". Responde "si", "no", una hora (ej. 8:30) o "cancelar".`, { prioridad: 3 });
+          await avisoNtfy(titulo, `No entendí "${t}". Toca un botón, escribe "si", "no" o "cancelar".`, { prioridad: 3 });
         },
         log,
       });
@@ -217,7 +254,7 @@ async function main() {
         log('FIN: sin respuesta por ntfy; no se envió el correo.');
         return;
       }
-      const t = resp.texto;
+      const t = sinEtiqueta(resp.texto);
       desde = resp.evento.time;
       log(`ntfy: respuesta recibida "${t}"`);
 
@@ -231,7 +268,8 @@ async function main() {
         return enviarYAvisar(hora);
       }
       if (esNo(t)) {
-        await avisoNtfy(titulo, '¿Cuál fue la hora de entrada de hoy? Escríbela en este tema (ejemplo: 8:30).', { prioridad: 4, etiquetas: ['question'] });
+        esperandoHora = true;
+        await avisoNtfy(titulo, '¿Cuál fue la hora de entrada? Escríbela en este tema (ejemplo: 8:30).', { prioridad: 4, etiquetas: ['question'] });
         continue;
       }
       // Hora escrita por el usuario
@@ -277,7 +315,7 @@ async function main() {
     personas,
     destinatarios: config.correo.destinatarios || [],
     cc: config.correo.cc || [],
-    asunto: (config.correo.asunto || 'Reporte Biométrico {fecha}').replace('{fecha}', fechaCorreo(fecha)),
+    asunto: asuntoCorreo(config.correo.asunto, fecha, propuesta.hora),
     saludo: config.correo.saludo,
     sinLlegadasTarde: config.correo.sinLlegadasTarde,
     archivoExcel: path.basename(rutaExcel),

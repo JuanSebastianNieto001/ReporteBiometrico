@@ -4,16 +4,27 @@
 const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
-const { fechaCorreo, segundosAHora } = require('./fechas');
+const { fechaCorreo, segundosAHora, horaASegundos } = require('./fechas');
+
+// Asunto a partir de la plantilla de config.json: {fecha} -> 3/09/2026, {hora} -> 9:00.
+// Sin hora (p. ej. el correo de prueba) se quita el tramo " - Entrada {hora}".
+function asuntoCorreo(plantilla, fecha, hora) {
+  const p = (plantilla || 'Reporte Biométrico {fecha} - Entrada {hora}').replace('{fecha}', fechaCorreo(fecha));
+  const seg = horaASegundos(hora);
+  if (seg == null) return p.replace(/\s*-\s*[^-]*\{hora\}/, '').replace('{hora}', '').trim();
+  return p.replace('{hora}', segundosAHora(seg, { conSegundos: false, ceroInicial: false }));
+}
 
 function escaparHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // tardes: [{ nombre, primeraSeg }]
-function construirCorreo({ fecha, tardes, config }) {
+// hora: hora de entrada del reporte. Va en el asunto porque hay días con varios reportes
+// (8:00, 9:00, 10:00) y sin ella los correos llegarían con el mismo asunto.
+function construirCorreo({ fecha, tardes, config, hora }) {
   const c = config.correo;
-  const asunto = (c.asunto || 'Reporte Biométrico - {fecha}').replace('{fecha}', fechaCorreo(fecha));
+  const asunto = asuntoCorreo(c.asunto, fecha, hora);
   const saludo = c.saludo || 'Buen día,\n\nSe envía reporte de biometría.';
   const filas = tardes.map(p => ({ nombre: p.nombre, hora: segundosAHora(p.primeraSeg, { ceroInicial: false }) }));
 
@@ -92,4 +103,4 @@ async function verificarConexion(config) {
   return true;
 }
 
-module.exports = { construirCorreo, enviarCorreo, verificarConexion };
+module.exports = { construirCorreo, asuntoCorreo, enviarCorreo, verificarConexion };

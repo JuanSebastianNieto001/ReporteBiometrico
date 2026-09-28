@@ -8,18 +8,34 @@
 
 const { aISO, claveDia, horaASegundos, normalizarHoraEntrada } = require('./fechas');
 
-function horaEntradaHabitual(fecha, config) {
+// Cada día puede tener varias horas de entrada (un reporte por cada una): en config.json el valor
+// de horarioHabitual / excepcionesPorFecha puede ser "08:00" o ["08:00", "09:00", "10:00"].
+function listaHoras(valor) {
+  const lista = Array.isArray(valor) ? valor : (valor ? [valor] : []);
+  return [...new Set(lista.map(normalizarHoraEntrada).filter(Boolean))].sort();
+}
+
+function horasEntradaDelDia(fecha, config) {
   const iso = aISO(fecha);
   const excepciones = config.excepcionesPorFecha || {};
-  if (excepciones[iso]) {
-    return { hora: normalizarHoraEntrada(excepciones[iso]), origen: `excepción configurada para el ${iso}` };
-  }
+  if (excepciones[iso]) return { horas: listaHoras(excepciones[iso]), origen: `excepción configurada para el ${iso}` };
   const dia = claveDia(fecha);
-  const habitual = (config.horarioHabitual || {})[dia];
-  if (habitual) {
-    return { hora: normalizarHoraEntrada(habitual), origen: `horario habitual (${dia})` };
-  }
-  return { hora: null, origen: `no hay horario habitual configurado para el día ${dia}` };
+  const horas = listaHoras((config.horarioHabitual || {})[dia]);
+  if (horas.length) return { horas, origen: `horario habitual (${dia})` };
+  return { horas: [], origen: `no hay horario habitual configurado para el día ${dia}` };
+}
+
+// Hora a usar cuando no se indica --hora (la tarea programada siempre la indica). Si el día tiene
+// varias, se toma la última cuyo reporte ya tocaba (hora + minutosDespues <= ahora); si ninguna, la primera.
+function horaEntradaHabitual(fecha, config, ahora = new Date()) {
+  const { horas, origen } = horasEntradaDelDia(fecha, config);
+  if (!horas.length) return { hora: null, origen, horas };
+  if (horas.length === 1 || aISO(ahora) !== aISO(fecha)) return { hora: horas[0], origen, horas };
+  const minutos = (config.programacion && config.programacion.minutosDespuesDeEntrada) || 30;
+  const ahoraSeg = ahora.getHours() * 3600 + ahora.getMinutes() * 60;
+  const vencidas = horas.filter(h => horaASegundos(h) + minutos * 60 <= ahoraSeg);
+  const hora = vencidas.length ? vencidas[vencidas.length - 1] : horas[0];
+  return { hora, origen: `${origen}, una de ${horas.join(' / ')} según la hora actual`, horas };
 }
 
 // Clave para agrupar: mayúsculas, sin espacios dobles, sin acentos.
@@ -70,4 +86,4 @@ function calcularLlegadasTarde(personas, horaEntrada, excluidos = []) {
     .sort((a, b) => b.primeraSeg - a.primeraSeg);
 }
 
-module.exports = { horaEntradaHabitual, agruparPorPersona, calcularLlegadasTarde, claveNombre };
+module.exports = { horaEntradaHabitual, horasEntradaDelDia,agruparPorPersona, calcularLlegadasTarde, claveNombre };

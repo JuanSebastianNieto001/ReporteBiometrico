@@ -20,7 +20,7 @@ del procedimiento (mismas 11 personas, mismo orden, misma hora del que aparecía
 | Modo | Qué hace | Para qué |
 | --- | --- | --- |
 | `inmediato` | Calcula con la hora habitual (o `--hora`) y envía de una vez. | Pruebas (estado actual). |
-| `ntfy` | Manda una notificación al celular (app **ntfy**): *"¿La hora de entrada de hoy fue 08:00?"* con botones **Sí, enviar** / **No, otra hora**. Con Sí envía. Con No pregunta la hora real; al escribirla recalcula y envía (al indicar otra hora SIEMPRE se vuelve a consultar la biométrica, esperando primero si aún no han pasado 30 min desde esa hora). También acepta escribir directamente una hora o `cancelar`. | Operación diaria desde el lunes. |
+| `ntfy` | Manda una notificación al celular (app **ntfy**): *"Reporte con hora de entrada 08:00: ¿se envía?"* con botones **Sí, enviar** / **No, otra hora**. Con Sí envía. Con No pregunta la hora real; al escribirla recalcula y envía (al indicar otra hora SIEMPRE se vuelve a consultar la biométrica, esperando primero si aún no han pasado 30 min desde esa hora). También acepta `cancelar`. Cada reporte del día (8:00, 9:00, 10:00) manda su propia pregunta y sus botones solo responden a ese reporte. | Operación diaria desde el lunes. |
 | `pagina` | Aviso de Windows y página local `http://127.0.0.1:4545` con la hora propuesta editable, la lista de llegadas tarde (con casillas para excluir) y vista previa. Envía solo al presionar *Confirmar hora y enviar correo*. | Cuando estás frente al computador. |
 
 ## Configuración
@@ -63,18 +63,18 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 ### 2. `config.json`
 
 ```json
-"horarioHabitual": { "lunes": "08:00", "martes": "08:00", "miercoles": "09:00", "jueves": "09:00", "viernes": "09:00", "sabado": null, "domingo": null },
+"horarioHabitual": { "lunes": ["08:00", "09:00"], "martes": ["08:00", "09:00"], "miercoles": ["08:00", "09:00", "10:00"], "jueves": ["08:00", "09:00", "10:00"], "viernes": ["08:00", "09:00", "10:00"], "sabado": null, "domingo": null },
 "excepcionesPorFecha": { "2026-09-12": "09:00" },
-"programacion": { "minutosDespuesDeEntrada": 45 },
-"correo": { "destinatarios": ["correo1@empresa.com", "correo2@empresa.com"], "cc": [], "asunto": "Reporte Biométrico {fecha}" },
+"programacion": { "minutosDespuesDeEntrada": 30 },
+"correo": { "destinatarios": ["correo1@empresa.com", "correo2@empresa.com"], "cc": [], "asunto": "Reporte Biométrico {fecha} - Entrada {hora}" },
 "confirmacion": { "modo": "inmediato", "esperaRespuestaHoras": 8 },
 "ntfy": { "servidor": "https://ntfy.sh", "tema": "TU-TEMA-LARGO-Y-SECRETO", "incluirNombres": false, "avisarEnvios": true }
 ```
 
-- `horarioHabitual`: hora de entrada que se propone cada día; `null` = sin horario fijo (se pide la hora).
-- `excepcionesPorFecha`: cambios puntuales ya conocidos; tienen prioridad sobre el habitual.
+- `horarioHabitual`: horas de entrada de cada día. Se envía **un reporte por cada hora** (lunes y martes 2: 8:00 y 9:00; miércoles a viernes 3: 8:00, 9:00 y 10:00). Acepta una hora (`"08:00"`) o una lista; `null` = sin horario fijo (se pide la hora).
+- `excepcionesPorFecha`: cambios puntuales ya conocidos (hora o lista); tienen prioridad sobre el habitual. Las tareas programadas siempre pasan `--hora`, así que una excepción solo cambia lo que se usa al ejecutar sin `--hora`.
 - `programacion.minutosDespuesDeEntrada`: el reporte se ejecuta 30 min después de la hora de entrada (tarea programada) y es el tiempo que espera si por ntfy se indica una hora posterior.
-- `correo.destinatarios`: hoy está el correo de prueba; cámbialo por los reales antes del lunes. `{fecha}` en el asunto se reemplaza por la fecha (ej. `3/09/2026`).
+- `correo.destinatarios`: hoy está el correo de prueba; cámbialo por los reales antes del lunes. `{fecha}` en el asunto se reemplaza por la fecha (ej. `3/09/2026`) y `{hora}` por la hora de entrada del reporte (ej. `9:00`), para distinguir los correos del mismo día.
   `saludo`, `sinLlegadasTarde`, `despedida` y `firmaHtml` completan el mensaje.
 - `correo.adjuntarExcel`: `true` (por defecto) adjunta al correo el Excel exportado desde `descargas\`. Ponlo en `false` para enviar solo el texto.
 - `ntfy.tema`: nombre del tema (largo y aleatorio, funciona como contraseña). `incluirNombres: true` agrega la lista de llegadas tarde a la notificación (por defecto solo va la cantidad, porque los temas de ntfy.sh son públicos para quien conozca el nombre).
@@ -103,12 +103,12 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 
 Parámetros de `node src\index.js`: `--modo`, `--hora HH:MM`, `--excel <ruta>`, `--fecha AAAA-MM-DD`, `--sin-enviar` (simula), `--sin-abrir`, `--sin-notificar`.
 
-## Programar la ejecución diaria (30 min después de la hora de entrada)
+## Programar la ejecución diaria (30 min después de cada hora de entrada)
 
 ```powershell
-npm run tarea                                 # 08:30 lunes/martes y 09:30 miércoles/jueves/viernes, según config.json
+npm run tarea                                 # una tarea por hora de entrada: 08:30 y 09:30 lun-vie, 10:30 mié-vie
 .\scripts\registrar-tarea.ps1 -Mostrar        # solo muestra el horario calculado
-.\scripts\registrar-tarea.ps1 -Eliminar       # quita la tarea
+.\scripts\registrar-tarea.ps1 -Eliminar       # quita las tareas
 ```
 
 El equipo debe estar encendido y con la sesión iniciada (puede estar bloqueado). Si estaba apagado a esa hora, la tarea corre al

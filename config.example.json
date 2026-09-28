@@ -11,11 +11,11 @@
     "tiempoEsperaMs": 45000
   },
   "horarioHabitual": {
-    "lunes": "08:00",
-    "martes": "08:00",
-    "miercoles": "09:00",
-    "jueves": "09:00",
-    "viernes": "09:00",
+    "lunes": ["08:00", "09:00"],
+    "martes": ["08:00", "09:00"],
+    "miercoles": ["08:00", "09:00", "10:00"],
+    "jueves": ["08:00", "09:00", "10:00"],
+    "viernes": ["08:00", "09:00", "10:00"],
     "sabado": null,
     "domingo": null
   },
@@ -27,7 +27,7 @@
     ],
     "cc": [],
     "nombreRemitente": "Soporte",
-    "asunto": "Reporte Biométrico {fecha}",
+    "asunto": "Reporte Biométrico {fecha} - Entrada {hora}",
     "saludo": "Buen día,\n\nSe envía reporte de biometría.",
     "sinLlegadasTarde": "No se registran llegadas tarde para el día de hoy.",
     "despedida": "",
@@ -53,6 +53,6 @@
     "token": ""
   },
   "programacion": {
-    "minutosDespuesDeEntrada": 45
+    "minutosDespuesDeEntrada": 30
   }
 }

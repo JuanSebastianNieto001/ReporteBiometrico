@@ -1,14 +1,20 @@
-# Registra (o actualiza) la tarea programada de Windows que ejecuta el reporte biométrico.
-# Por defecto calcula las horas a partir de config.json: hora de entrada habitual de cada día
-# + programacion.minutosDespuesDeEntrada (45). Ej.: lunes/martes/jueves 08:45, miércoles/viernes 09:45.
+# Registra (o actualiza) las tareas programadas de Windows que ejecutan el reporte biométrico.
+# Por defecto hay UNA TAREA POR HORA DE ENTRADA de config.json > horarioHabitual (un día puede tener
+# varias: "lunes": ["08:00", "09:00"]). Cada tarea corre programacion.minutosDespuesDeEntrada (30)
+# después de su hora y ejecuta "node src\index.js --hora HH:MM" para esa hora. Ej.:
+#   ReporteBiometrico-0800  08:30  lunes a viernes
+#   ReporteBiometrico-0900  09:30  lunes a viernes
+#   ReporteBiometrico-1000  10:30  miércoles a viernes
+# Van en tareas separadas (y no en una con varios disparadores) porque una tarea no arranca otra vez
+# mientras sigue corriendo, y el reporte de las 8:00 puede seguir esperando la respuesta de ntfy a las 9:30.
 #
 # Uso (PowerShell, en la carpeta del proyecto):
 #   .\scripts\registrar-tarea.ps1                     -> según config.json
 #   .\scripts\registrar-tarea.ps1 -Mostrar            -> solo muestra qué registraría
-#   .\scripts\registrar-tarea.ps1 -Hora 10:00 -Dias Monday,Tuesday   -> horario manual
-#   .\scripts\registrar-tarea.ps1 -Eliminar           -> quita la tarea
+#   .\scripts\registrar-tarea.ps1 -Hora 10:00 -Dias Monday,Tuesday   -> una sola tarea manual, sin --hora
+#   .\scripts\registrar-tarea.ps1 -Eliminar           -> quita todas las tareas del reporte
 #
-# La tarea corre con la sesión del usuario actual (el equipo debe estar encendido y con la sesión iniciada;
+# Las tareas corren con la sesión del usuario actual (el equipo debe estar encendido y con la sesión iniciada;
 # puede estar bloqueado). Lo que ocurre al ejecutarse depende de config.json > confirmacion.modo.
 param(
   [string]$Hora,
@@ -18,12 +24,16 @@ param(
   [switch]$Mostrar
 )
 
-$Nombre = "ReporteBiometrico"
+$Prefijo = "ReporteBiometrico"
 $Raiz = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
+function Get-TareasReporte { Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object { $_.TaskName -eq $Prefijo -or $_.TaskName -like "$Prefijo-*" } }
+
 if ($Eliminar) {
-  Unregister-ScheduledTask -TaskName $Nombre -Confirm:$false -ErrorAction SilentlyContinue
-  Write-Host "Tarea '$Nombre' eliminada."
+  foreach ($t in Get-TareasReporte) {
+    Unregister-ScheduledTask -TaskName $t.TaskName -Confirm:$false
+    Write-Host "Tarea '$($t.TaskName)' eliminada."
+  }
   exit 0
 }
 
@@ -31,36 +41,41 @@ $Node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $Node) { $Node = "C:\Program Files\nodejs\node.exe" }
 if (-not (Test-Path $Node)) { Write-Error "No se encontró node.exe. Instala Node.js primero."; exit 1 }
 
-# Horarios: manual (-Hora) o calculados desde config.json
-$grupos = @{}
+# Tareas a registrar: nombre -> @{ Disparo = "HH:mm"; Dias = @(...); Argumentos = "..." }
+$tareas = [ordered]@{}
 if ($Hora) {
-  $grupos[$Hora] = $Dias
+  $tareas[$Prefijo] = @{ Disparo = $Hora; Dias = $Dias; Argumentos = "src\index.js" }
 } else {
   $cfg = Get-Content (Join-Path $Raiz "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($MinutosDespues -le 0) {
-    $MinutosDespues = 45
+    $MinutosDespues = 30
     if ($cfg.programacion -and $cfg.programacion.minutosDespuesDeEntrada) { $MinutosDespues = [int]$cfg.programacion.minutosDespuesDeEntrada }
   }
-  $mapa = @{ lunes = "Monday"; martes = "Tuesday"; miercoles = "Wednesday"; jueves = "Thursday"; viernes = "Friday"; sabado = "Saturday"; domingo = "Sunday" }
-  foreach ($p in $cfg.horarioHabitual.PSObject.Properties) {
-    if (-not $p.Value) { continue }
-    $entrada = [datetime]::ParseExact([string]$p.Value, "H:mm", $null)
-    $t = $entrada.AddMinutes($MinutosDespues).ToString("HH:mm")
-    if (-not $grupos.ContainsKey($t)) { $grupos[$t] = @() }
-    $grupos[$t] += $mapa[$p.Name]
+  $mapa = [ordered]@{ lunes = "Monday"; martes = "Tuesday"; miercoles = "Wednesday"; jueves = "Thursday"; viernes = "Friday"; sabado = "Saturday"; domingo = "Sunday" }
+  $porHora = @{}
+  foreach ($dia in $mapa.Keys) {
+    foreach ($h in @($cfg.horarioHabitual.$dia)) {
+      if (-not $h) { continue }
+      $entrada = [datetime]::ParseExact([string]$h, "H:mm", $null).ToString("HH:mm")
+      if (-not $porHora.ContainsKey($entrada)) { $porHora[$entrada] = @() }
+      $porHora[$entrada] += $mapa[$dia]
+    }
   }
-  if ($grupos.Count -eq 0) { Write-Error "config.json > horarioHabitual no tiene ninguna hora configurada."; exit 1 }
+  if ($porHora.Count -eq 0) { Write-Error "config.json > horarioHabitual no tiene ninguna hora configurada."; exit 1 }
+  foreach ($entrada in ($porHora.Keys | Sort-Object)) {
+    $disparo = [datetime]::ParseExact($entrada, "HH:mm", $null).AddMinutes($MinutosDespues).ToString("HH:mm")
+    $tareas["$Prefijo-" + $entrada.Replace(":", "")] = @{ Disparo = $disparo; Dias = $porHora[$entrada]; Argumentos = "src\index.js --hora $entrada" }
+  }
 }
 
-Write-Host "Tarea '$Nombre' -> $Node src\index.js (carpeta $Raiz)"
-foreach ($k in ($grupos.Keys | Sort-Object)) { Write-Host ("  {0}  {1}" -f $k, ($grupos[$k] -join ", ")) }
+Write-Host "Node: $Node (carpeta $Raiz)"
+foreach ($n in $tareas.Keys) { Write-Host ("  {0,-24} {1}  {2,-32} {3}" -f $n, $tareas[$n].Disparo, ($tareas[$n].Dias -join ", "), $tareas[$n].Argumentos) }
+$sobran = @(Get-TareasReporte | Where-Object { -not $tareas.Contains($_.TaskName) })
+foreach ($t in $sobran) { Write-Host "  (se elimina la tarea anterior '$($t.TaskName)')" }
 if ($Mostrar) { exit 0 }
 
-$triggers = @()
-foreach ($k in ($grupos.Keys | Sort-Object)) {
-  $triggers += New-ScheduledTaskTrigger -Weekly -DaysOfWeek $grupos[$k] -At $k
-}
-$Accion = New-ScheduledTaskAction -Execute $Node -Argument "src\index.js" -WorkingDirectory $Raiz
+foreach ($t in $sobran) { Unregister-ScheduledTask -TaskName $t.TaskName -Confirm:$false }
+
 # -StartWhenAvailable: si el equipo estaba apagado a la hora del disparador, corre al encenderlo.
 # -WakeToRun: despierta el equipo si alguien vuelve a activar la suspension (deberia estar en 'Nunca').
 # -ExecutionTimeLimit 12 h: cubre la espera de la respuesta por ntfy (confirmacion.esperaRespuestaHoras).
@@ -71,6 +86,11 @@ $Accion = New-ScheduledTaskAction -Execute $Node -Argument "src\index.js" -Worki
 $Config = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 12) -MultipleInstances IgnoreNew
 $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
 
-Register-ScheduledTask -TaskName $Nombre -Action $Accion -Trigger $triggers -Settings $Config -Principal $Principal -Force | Out-Null
-Write-Host "Tarea '$Nombre' registrada."
-Write-Host "Para probarla ahora:  Start-ScheduledTask -TaskName $Nombre"
+foreach ($n in $tareas.Keys) {
+  $t = $tareas[$n]
+  $Accion = New-ScheduledTaskAction -Execute $Node -Argument $t.Argumentos -WorkingDirectory $Raiz
+  $Disparador = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $t.Dias -At $t.Disparo
+  Register-ScheduledTask -TaskName $n -Action $Accion -Trigger $Disparador -Settings $Config -Principal $Principal -Force | Out-Null
+  Write-Host "Tarea '$n' registrada."
+}
+Write-Host "Para probar una ahora:  Start-ScheduledTask -TaskName <nombre>"
