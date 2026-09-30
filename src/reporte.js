@@ -31,7 +31,7 @@ function horaEntradaHabitual(fecha, config, ahora = new Date()) {
   const { horas, origen } = horasEntradaDelDia(fecha, config);
   if (!horas.length) return { hora: null, origen, horas };
   if (horas.length === 1 || aISO(ahora) !== aISO(fecha)) return { hora: horas[0], origen, horas };
-  const minutos = (config.programacion && config.programacion.minutosDespuesDeEntrada) || 30;
+  const minutos = (config.programacion && config.programacion.minutosDespuesDeEntrada) || 45;
   const ahoraSeg = ahora.getHours() * 3600 + ahora.getMinutes() * 60;
   const vencidas = horas.filter(h => horaASegundos(h) + minutos * 60 <= ahoraSeg);
   const hora = vencidas.length ? vencidas[vencidas.length - 1] : horas[0];
@@ -75,15 +75,31 @@ function agruparPorPersona(registros, fechaISO) {
   return personas;
 }
 
+// Turno (franja) al que pertenece una persona según su PRIMERA marcación, cuando el día tiene varias
+// horas de entrada. Quien marca en los `margenMin` minutos previos a una hora es de ese turno; quien
+// marca antes es del turno anterior. Con 8:00/9:00/10:00 y 15 min:
+//   hasta 8:44 -> 8:00 (tarde desde 8:00) | 8:45-9:44 -> 9:00 (tarde desde 9:00) | 9:45 en adelante -> 10:00
+// Así nadie sale en dos reportes y quien entra a las 9:00 no sale tarde en el de las 8:00.
+// Límite conocido: uno del turno 8:00 que marque a las 8:50 cuenta como del turno 9:00 a tiempo.
+function turnoDe(primeraSeg, horas, margenMin) {
+  let turno = horas[0];
+  for (const h of horas.slice(1)) if (primeraSeg >= horaASegundos(h) - margenMin * 60) turno = h;
+  return turno;
+}
+
 // Devuelve las personas cuya PRIMERA marcación fue >= hora de entrada.
-function calcularLlegadasTarde(personas, horaEntrada, excluidos = []) {
-  const segEntrada = horaASegundos(horaEntrada);
+// turnos: { horas: [...horas de entrada del día], margenMin } -> solo cuenta a las personas de ese turno.
+function calcularLlegadasTarde(personas, horaEntrada, excluidos = [], turnos = null) {
+  const h = normalizarHoraEntrada(horaEntrada);
+  const segEntrada = horaASegundos(h);
   if (segEntrada == null) throw new Error(`Hora de entrada inválida: "${horaEntrada}"`);
   const setExcluidos = new Set(excluidos.map(claveNombre));
+  const horas = turnos && turnos.horas && turnos.horas.length > 1 ? turnos.horas : null;
   return personas
     .filter(p => p.primeraSeg >= segEntrada)
+    .filter(p => !horas || turnoDe(p.primeraSeg, horas, turnos.margenMin) === h)
     .filter(p => !setExcluidos.has(claveNombre(p.nombre)))
     .sort((a, b) => b.primeraSeg - a.primeraSeg);
 }
 
-module.exports = { horaEntradaHabitual, horasEntradaDelDia,agruparPorPersona, calcularLlegadasTarde, claveNombre };
+module.exports = { horaEntradaHabitual, horasEntradaDelDia, turnoDe, agruparPorPersona, calcularLlegadasTarde, claveNombre };

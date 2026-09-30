@@ -1,10 +1,11 @@
 # Registra (o actualiza) las tareas programadas de Windows que ejecutan el reporte biométrico.
 # Por defecto hay UNA TAREA POR HORA DE ENTRADA de config.json > horarioHabitual (un día puede tener
-# varias: "lunes": ["08:00", "09:00"]). Cada tarea corre programacion.minutosDespuesDeEntrada (30)
-# después de su hora y ejecuta "node src\index.js --hora HH:MM" para esa hora. Ej.:
-#   ReporteBiometrico-0800  08:30  lunes a viernes
-#   ReporteBiometrico-0900  09:30  lunes a viernes
-#   ReporteBiometrico-1000  10:30  miércoles a viernes
+# varias: "lunes": ["08:00", "09:00"]). Cada tarea corre programacion.minutosDespuesDeEntrada (45)
+# después de su hora, y también al iniciar sesión por si el equipo estaba apagado, y ejecuta
+# "node src\index.js --hora HH:MM --programada" para esa hora. Ej.:
+#   ReporteBiometrico-0800  08:45  lunes a viernes
+#   ReporteBiometrico-0900  09:45  lunes a viernes
+#   ReporteBiometrico-1000  10:45  miércoles a viernes
 # Van en tareas separadas (y no en una con varios disparadores) porque una tarea no arranca otra vez
 # mientras sigue corriendo, y el reporte de las 8:00 puede seguir esperando la respuesta de ntfy a las 9:30.
 #
@@ -48,7 +49,7 @@ if ($Hora) {
 } else {
   $cfg = Get-Content (Join-Path $Raiz "config.json") -Raw -Encoding UTF8 | ConvertFrom-Json
   if ($MinutosDespues -le 0) {
-    $MinutosDespues = 30
+    $MinutosDespues = 45
     if ($cfg.programacion -and $cfg.programacion.minutosDespuesDeEntrada) { $MinutosDespues = [int]$cfg.programacion.minutosDespuesDeEntrada }
   }
   $mapa = [ordered]@{ lunes = "Monday"; martes = "Tuesday"; miercoles = "Wednesday"; jueves = "Thursday"; viernes = "Friday"; sabado = "Saturday"; domingo = "Sunday" }
@@ -64,7 +65,7 @@ if ($Hora) {
   if ($porHora.Count -eq 0) { Write-Error "config.json > horarioHabitual no tiene ninguna hora configurada."; exit 1 }
   foreach ($entrada in ($porHora.Keys | Sort-Object)) {
     $disparo = [datetime]::ParseExact($entrada, "HH:mm", $null).AddMinutes($MinutosDespues).ToString("HH:mm")
-    $tareas["$Prefijo-" + $entrada.Replace(":", "")] = @{ Disparo = $disparo; Dias = $porHora[$entrada]; Argumentos = "src\index.js --hora $entrada" }
+    $tareas["$Prefijo-" + $entrada.Replace(":", "")] = @{ Disparo = $disparo; Dias = $porHora[$entrada]; Argumentos = "src\index.js --hora $entrada --programada"; AlIniciarSesion = $true }
   }
 }
 
@@ -89,8 +90,12 @@ $Principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" 
 foreach ($n in $tareas.Keys) {
   $t = $tareas[$n]
   $Accion = New-ScheduledTaskAction -Execute $Node -Argument $t.Argumentos -WorkingDirectory $Raiz
-  $Disparador = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $t.Dias -At $t.Disparo
-  Register-ScheduledTask -TaskName $n -Action $Accion -Trigger $Disparador -Settings $Config -Principal $Principal -Force | Out-Null
+  $Disparadores = @(New-ScheduledTaskTrigger -Weekly -DaysOfWeek $t.Dias -At $t.Disparo)
+  # Segundo disparador al iniciar sesión: si el equipo estaba apagado a la hora del reporte, corre
+  # apenas se entra. Con --programada el programa decide si toca (día con esa hora, ya pasó la hora
+  # de envío, no se envió/canceló antes), así que iniciar sesión otras veces no duplica nada.
+  if ($t.AlIniciarSesion) { $Disparadores += New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME" }
+  Register-ScheduledTask -TaskName $n -Action $Accion -Trigger $Disparadores -Settings $Config -Principal $Principal -Force | Out-Null
   Write-Host "Tarea '$n' registrada."
 }
 Write-Host "Para probar una ahora:  Start-ScheduledTask -TaskName <nombre>"

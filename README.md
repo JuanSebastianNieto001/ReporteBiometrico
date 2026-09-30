@@ -64,16 +64,18 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 
 ```json
 "horarioHabitual": { "lunes": ["08:00", "09:00"], "martes": ["08:00", "09:00"], "miercoles": ["08:00", "09:00", "10:00"], "jueves": ["08:00", "09:00", "10:00"], "viernes": ["08:00", "09:00", "10:00"], "sabado": null, "domingo": null },
+"turnos": { "margenMinutos": 15 },
 "excepcionesPorFecha": { "2026-09-12": "09:00" },
-"programacion": { "minutosDespuesDeEntrada": 30 },
+"programacion": { "minutosDespuesDeEntrada": 45 },
 "correo": { "destinatarios": ["correo1@empresa.com", "correo2@empresa.com"], "cc": [], "asunto": "Reporte Biométrico {fecha} - Entrada {hora}" },
 "confirmacion": { "modo": "inmediato", "esperaRespuestaHoras": 8 },
 "ntfy": { "servidor": "https://ntfy.sh", "tema": "TU-TEMA-LARGO-Y-SECRETO", "incluirNombres": false, "avisarEnvios": true }
 ```
 
 - `horarioHabitual`: horas de entrada de cada día. Se envía **un reporte por cada hora** (lunes y martes 2: 8:00 y 9:00; miércoles a viernes 3: 8:00, 9:00 y 10:00). Acepta una hora (`"08:00"`) o una lista; `null` = sin horario fijo (se pide la hora).
+- `turnos.margenMinutos`: con varias horas en el día, cada persona pertenece al turno que le da su **primera marcación**, y solo sale en el reporte de ese turno. Quien marca en los 15 min previos a una hora es de ese turno. Con 8:00, 9:00 y 10:00: hasta las 8:44 es del turno 8:00 (tarde desde las 8:00); de 8:45 a 9:44, del turno 9:00 (tarde desde las 9:00); desde las 9:45, del turno 10:00. Límite: uno del turno 8:00 que marque a las 8:50 cuenta como del turno 9:00 a tiempo.
 - `excepcionesPorFecha`: cambios puntuales ya conocidos (hora o lista); tienen prioridad sobre el habitual. Las tareas programadas siempre pasan `--hora`, así que una excepción solo cambia lo que se usa al ejecutar sin `--hora`.
-- `programacion.minutosDespuesDeEntrada`: el reporte se ejecuta 30 min después de la hora de entrada (tarea programada) y es el tiempo que espera si por ntfy se indica una hora posterior.
+- `programacion.minutosDespuesDeEntrada`: el reporte se ejecuta 45 min después de cada hora de entrada (así cubre toda la franja: el de las 8:00 incluye a quien llegó hasta las 8:44) (tarea programada) y es el tiempo que espera si por ntfy se indica una hora posterior.
 - `correo.destinatarios`: hoy está el correo de prueba; cámbialo por los reales antes del lunes. `{fecha}` en el asunto se reemplaza por la fecha (ej. `3/09/2026`) y `{hora}` por la hora de entrada del reporte (ej. `9:00`), para distinguir los correos del mismo día.
   `saludo`, `sinLlegadasTarde`, `despedida` y `firmaHtml` completan el mensaje.
 - `correo.adjuntarExcel`: `true` (por defecto) adjunta al correo el Excel exportado desde `descargas\`. Ponlo en `false` para enviar solo el texto.
@@ -103,16 +105,22 @@ Prueba el envío en segundos con `npm run correo:prueba` (manda un correo marcad
 
 Parámetros de `node src\index.js`: `--modo`, `--hora HH:MM`, `--excel <ruta>`, `--fecha AAAA-MM-DD`, `--sin-enviar` (simula), `--sin-abrir`, `--sin-notificar`.
 
-## Programar la ejecución diaria (30 min después de cada hora de entrada)
+## Programar la ejecución diaria (45 min después de cada hora de entrada)
 
 ```powershell
-npm run tarea                                 # una tarea por hora de entrada: 08:30 y 09:30 lun-vie, 10:30 mié-vie
+npm run tarea                                 # una tarea por hora de entrada: 08:45 y 09:45 lun-vie, 10:45 mié-vie
 .\scripts\registrar-tarea.ps1 -Mostrar        # solo muestra el horario calculado
 .\scripts\registrar-tarea.ps1 -Eliminar       # quita las tareas
 ```
 
-El equipo debe estar encendido y con la sesión iniciada (puede estar bloqueado). Si estaba apagado a esa hora, la tarea corre al
-encenderlo. Con `confirmacion.modo = "ntfy"` la tarea consulta la biométrica, manda la pregunta al celular y espera la respuesta
+El equipo debe estar encendido y con la sesión iniciada (puede estar bloqueado). Cada tarea también se dispara **al iniciar sesión**:
+si el equipo estaba apagado a su hora, el reporte corre apenas se entra. Las tareas pasan `--programada`, con lo que el programa no hace
+nada si ese reporte ya se envió o canceló hoy (registro en `logsenviados.json`), si otro igual está en curso, si el día no tiene esa
+hora o si aún no es hora de enviarlo.
+
+Windows **no puede encender un equipo apagado del todo** (solo despertarlo de suspensión o hibernación). Hoy algo del sistema lo apaga a
+las 9:00 pm con `shutdown.exe`. Para que los reportes salgan a su hora hay que pedir a TI que a esa hora lo hiberne en vez de apagarlo
+(las tareas tienen `-WakeToRun` y los temporizadores de reactivación están habilitados), o activar el encendido por RTC en la BIOS. Con `confirmacion.modo = "ntfy"` la tarea consulta la biométrica, manda la pregunta al celular y espera la respuesta
 hasta `esperaRespuestaHoras`.
 
 ## Estructura

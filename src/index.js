@@ -9,6 +9,9 @@
 //   --sin-enviar                            no envía el correo: solo muestra lo que enviaría
 //   --solo-redactar                         abre Gmail y deja el correo redactado y adjuntado, pero NO pulsa Enviar
 //   --sin-abrir / --sin-notificar           (modo pagina) no abre el navegador / sin aviso de Windows
+//   --programada                            lo usan las tareas programadas (con --hora): no hace nada si ese
+//                                           reporte ya se envió/canceló hoy, si otro igual está en curso, si hoy
+//                                           no tiene esa hora o si aún no es hora de enviarlo (disparo al iniciar sesión)
 //
 // Modos:
 //   inmediato  calcula con la hora habitual (o --hora) y envía de una vez. Pensado para pruebas.
@@ -21,7 +24,7 @@ const fs = require('fs');
 const config = require('./config');
 const { iniciar: iniciarLog, log } = require('./log');
 const { leerRegistros } = require('./excel');
-const { horaEntradaHabitual, agruparPorPersona, calcularLlegadasTarde } = require('./reporte');
+const { horaEntradaHabitual, horasEntradaDelDia, agruparPorPersona, calcularLlegadasTarde } = require('./reporte');
 const { construirCorreo, enviarCorreo, asuntoCorreo } = require('./correo');
 const { enviarCorreoNavegador } = require('./correo-navegador');
 const { iniciarServidorConfirmacion } = require('./confirmar');
@@ -41,6 +44,7 @@ function argumentos() {
     soloRedactar: a.includes('--solo-redactar'),
     sinAbrir: a.includes('--sin-abrir'),
     sinNotificar: a.includes('--sin-notificar'),
+    programada: a.includes('--programada'),
   };
 }
 
@@ -66,6 +70,36 @@ async function conCandado(nombre, fn) {
   }
   try { return await fn(); } finally { try { fs.unlinkSync(ruta); } catch (_) { /* ignorar */ } }
 }
+// Registro de los reportes ya atendidos (logs/enviados.json: { "2026-09-30 08:00": { estado, momento } }).
+// Cada tarea programada tiene dos disparadores (su hora y el inicio de sesión, por si el equipo estaba
+// apagado): con este registro el segundo no repite un reporte que ya salió.
+const rutaEnviados = () => path.join(config.rutas.logs, 'enviados.json');
+function leerEnviados() { try { return JSON.parse(fs.readFileSync(rutaEnviados(), 'utf8')); } catch (_) { return {}; } }
+function marcarReporte(fechaISO, hora, estado) {
+  const r = leerEnviados();
+  r[`${fechaISO} ${hora}`] = { estado, momento: new Date().toISOString() };
+  fs.writeFileSync(rutaEnviados(), JSON.stringify(r, null, 2));
+}
+
+// Candado sin espera para todo un reporte (fecha + hora): si ya hay otro proceso con el mismo reporte
+// (p. ej. esperando la respuesta de ntfy) devuelve false. Se libera al salir del proceso.
+function tomarCandadoReporte(fechaISO, hora) {
+  const ruta = path.join(config.rutas.logs, `.reporte-${fechaISO}-${hora.replace(':', '')}.lock`);
+  try {
+    fs.writeFileSync(ruta, String(process.pid), { flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    let pid = null;
+    try { pid = Number(fs.readFileSync(ruta, 'utf8')); } catch (_) { /* ignorar */ }
+    let vivo = false;
+    try { if (pid) { process.kill(pid, 0); vivo = true; } } catch (_) { /* el proceso ya no existe */ }
+    if (vivo) return false;
+    fs.writeFileSync(ruta, String(process.pid));
+  }
+  process.on('exit', () => { try { fs.unlinkSync(ruta); } catch (_) { /* ignorar */ } });
+  return true;
+}
+
 const ntfyConfigurado = () => !!(config.ntfy && config.ntfy.tema && !/X{4,}/.test(config.ntfy.tema));
 
 async function avisoNtfy(titulo, mensaje, extra = {}) {
@@ -83,7 +117,26 @@ async function main() {
   if (args.hora && !normalizarHoraEntrada(args.hora)) throw new Error(`--hora inválida: ${args.hora}`);
 
   log('================================================================');
-  log(`Inicio del reporte biométrico para ${fechaLarga(fecha)} | modo: ${modo}${args.sinEnviar ? ' | --sin-enviar' : ''} | log: ${archivoLog}`);
+  log(`Inicio del reporte biométrico para ${fechaLarga(fecha)} | modo: ${modo}${args.hora ? ` | hora ${normalizarHoraEntrada(args.hora)}` : ''}${args.programada ? ' | tarea programada' : ''}${args.sinEnviar ? ' | --sin-enviar' : ''} | log: ${archivoLog}`);
+
+  const turnosDelDia = horasEntradaDelDia(fecha, config).horas;
+  const margenTurno = (config.turnos && config.turnos.margenMinutos != null) ? Number(config.turnos.margenMinutos) : 15;
+
+  // ---- Tarea programada: ¿toca este reporte? (antes de entrar a la biométrica) ----
+  if (args.programada) {
+    const h = normalizarHoraEntrada(args.hora);
+    if (!h) throw new Error('--programada necesita --hora HH:MM');
+    const minutos = (config.programacion && config.programacion.minutosDespuesDeEntrada) || 45;
+    const ahora = new Date();
+    const ahoraSeg = ahora.getHours() * 3600 + ahora.getMinutes() * 60 + ahora.getSeconds();
+    const previo = leerEnviados()[`${fechaISO} ${h}`];
+    let motivo = null;
+    if (!turnosDelDia.includes(h)) motivo = `hoy (${nombreDia(fecha)}) no tiene hora de entrada ${h}`;
+    else if (ahoraSeg < horaASegundos(h) + minutos * 60 - 120) motivo = `aún no es hora: este reporte se envía a partir de las ${segundosAHora(horaASegundos(h) + minutos * 60, { conSegundos: false })}`;
+    else if (previo) motivo = `el reporte de las ${h} de hoy ya quedó ${previo.estado} (${new Date(previo.momento).toLocaleTimeString('es-CO')})`;
+    else if (!tomarCandadoReporte(fechaISO, h)) motivo = `el reporte de las ${h} de hoy ya está en curso en otro proceso`;
+    if (motivo) { log(`FIN: no se ejecuta — ${motivo}.`); return; }
+  }
 
   // ---- Datos: Excel de la biométrica (o uno dado por parámetro) -> personas con su primera marcación ----
   // Momento (segundos del dia) en que se consulto la biometrica. Sirve para saber si los datos
@@ -117,14 +170,26 @@ async function main() {
   const propuesta = args.hora
     ? { hora: normalizarHoraEntrada(args.hora), origen: 'indicada con --hora' }
     : horaEntradaHabitual(fecha, config);
-  const tardesPropuestas = propuesta.hora ? calcularLlegadasTarde(personas, propuesta.hora) : [];
+
+  // Llegadas tarde de UN turno: con varias horas de entrada en el día, cada persona pertenece a la franja
+  // que le da su primera marcación (reporte.turnoDe) y solo cuenta en el reporte de su turno. Si la hora
+  // se cambió (ntfy/página), la nueva ocupa el lugar de la propuesta entre las horas del día.
+  function tardesCon(h, excluidos = []) {
+    let horas = turnosDelDia.map(x => (x === propuesta.hora ? h : x));
+    if (!horas.includes(h)) horas.push(h);
+    horas = [...new Set(horas)].sort();
+    return calcularLlegadasTarde(personas, h, excluidos, { horas, margenMin: margenTurno });
+  }
+
+  const tardesPropuestas = propuesta.hora ? tardesCon(propuesta.hora) : [];
   log(`Hora de entrada propuesta: ${propuesta.hora || '(ninguna)'} — ${propuesta.origen}. Llegadas tarde con esa hora: ${tardesPropuestas.length}`);
+  if (turnosDelDia.length > 1) log(`  Turnos del día: ${turnosDelDia.join(' / ')}; cada persona va al turno de su primera marcación (${margenTurno} min antes de una hora ya es de ese turno).`);
 
   // ---- Envío (único punto por donde sale el correo) ----
   async function enviarReporte({ hora, excluidos = [], destinatarios, cc = [], asunto } = {}) {
     const h = normalizarHoraEntrada(hora);
     if (!h) throw new Error(`Hora de entrada inválida: "${hora}"`);
-    const tardes = calcularLlegadasTarde(personas, h, excluidos);
+    const tardes = tardesCon(h, excluidos);
     const correo = construirCorreo({ fecha, tardes, config, hora: h });
     if (asunto && asunto.trim()) correo.asunto = asunto.trim();
     const para = destinatarios && destinatarios.length ? destinatarios : (config.correo.destinatarios || []);
@@ -145,9 +210,11 @@ async function main() {
         return { hora: h, tardes, correo, para, adjuntos, resultado: r, simulado: true };
       }
       log('Correo enviado por Gmail web (navegador).');
+      if (!args.excel) marcarReporte(fechaISO, propuesta.hora || h, 'enviado');
     } else {
       r = await enviarCorreo({ para, cc, asunto: correo.asunto, texto: correo.texto, html: correo.html, adjuntos, config });
       log(`Correo enviado por SMTP. id=${r.messageId} aceptados=${(r.aceptados || []).join(',')}`);
+      if (!args.excel) marcarReporte(fechaISO, propuesta.hora || h, 'enviado');
     }
     return { hora: h, tardes, correo, para, adjuntos, resultado: r };
   }
@@ -183,7 +250,7 @@ async function main() {
     const titulo = `Reporte biométrico ${fechaCorreo(fecha)}${propuesta.hora ? ` (entrada ${propuesta.hora})` : ''}`;
     let desde = Math.floor(Date.now() / 1000) - 2;
     let hora = propuesta.hora;
-    const resumenCon = (h) => { const t = calcularLlegadasTarde(personas, h); return `${t.length} llegada(s) tarde de ${personas.length} persona(s) con marcación` + (cfgN.incluirNombres && t.length ? ':\n' + textoTardes(t) : ''); };
+    const resumenCon = (h) => { const t = tardesCon(h); return `${t.length} llegada(s) tarde de ${personas.length} persona(s) con marcación` + (cfgN.incluirNombres && t.length ? ':\n' + textoTardes(t) : ''); };
 
     if (hora) {
       await ntfy.publicar(cfgN, {
@@ -260,6 +327,7 @@ async function main() {
 
       if (esCancelar(t)) {
         await avisoNtfy(titulo, 'Cancelado. No se envió el reporte de hoy.', { prioridad: 3 });
+        if (propuesta.hora && !args.excel) marcarReporte(fechaISO, propuesta.hora, 'cancelado');
         log('FIN: cancelado desde ntfy; no se envió el correo.');
         return;
       }
