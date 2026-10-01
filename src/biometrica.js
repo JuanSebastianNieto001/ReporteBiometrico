@@ -242,7 +242,7 @@ async function escribirExcel(ruta, filas, { fechaISO, operador, marca }) {
   await wb.xlsx.writeFile(ruta);
 }
 
-async function exportarExcel({ config, log, fecha }) {
+async function exportarExcelUnaVez({ config, log, fecha }) {
   const bio = config.biometrica;
   const cred = config.credenciales.biometrica;
   if (!cred.usuario || !cred.clave) throw new Error('Faltan BIO_USUARIO o BIO_CLAVE en el archivo .env');
@@ -260,6 +260,7 @@ async function exportarExcel({ config, log, fecha }) {
   page.setDefaultTimeout(espera);
 
   let paso = 'inicio';
+  let loginEnviado = false;
   const captura = async (nombre) => {
     try { await page.screenshot({ path: path.join(capturas, `${marca}_${nombre}.png`) }); } catch (_) { /* ignorar */ }
   };
@@ -295,6 +296,7 @@ async function exportarExcel({ config, log, fecha }) {
       await captura('01_login_campos_vacios');
       throw new Error('No se pudieron escribir usuario y contraseña en el formulario de HikCentral: el campo se limpia solo. NO se envió ningún intento de inicio de sesión, así que no hay riesgo de bloqueo de IP. Revisa la captura 01_login_campos_vacios.');
     }
+    loginEnviado = true;
     await page.locator('button.login-btn').click();
     const resultadoLogin = await Promise.race([
       page.locator('.el-dialog, .el-message-box').filter({ hasText: RE_ERROR_LOGIN }).filter({ hasNotText: RE_CADUCA }).first().waitFor().then(() => 'error').catch(() => 'timeout'),
@@ -481,7 +483,9 @@ async function exportarExcel({ config, log, fecha }) {
   } catch (e) {
     await captura(`error_${paso}`);
     try { fs.writeFileSync(path.join(capturas, `${marca}_error_${paso}.html`), await page.content()); } catch (_) { /* ignorar */ }
-    const dialogos = await textoDialogos(page);
+    // Con el navegador cerrado textoDialogos también falla: no debe tapar el error original.
+    const dialogos = await textoDialogos(page).catch(() => '');
+    e.antesDelLogin = !loginEnviado;
     e.message = `Falló el paso "${paso}": ${e.message}${dialogos ? ` | Diálogos en pantalla: ${dialogos.slice(0, 200)}` : ''} | Capturas en ${capturas}`;
     throw e;
   } finally {
@@ -490,6 +494,21 @@ async function exportarExcel({ config, log, fecha }) {
       await page.waitForTimeout(bio.mantenerAbierto * 1000).catch(() => {});
     }
     await browser.close().catch(() => {});
+  }
+}
+
+// Chrome a veces se cierra solo mientras carga HikCentral (01/10/2026 a las 10:45 se cerró esperando el
+// formulario de login). Si pasa ANTES de pulsar "Iniciar sesión" se reintenta una vez: no se gastó ningún
+// intento de login, así que no hay riesgo de bloqueo de IP. Después del login NO se reintenta.
+const RE_NAVEGADOR_CERRADO = /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/i;
+async function exportarExcel(opciones) {
+  try {
+    return await exportarExcelUnaVez(opciones);
+  } catch (e) {
+    if (!(e.antesDelLogin && RE_NAVEGADOR_CERRADO.test(e.message))) throw e;
+    opciones.log('El navegador se cerró antes de iniciar sesión en la biométrica (no se envió ningún intento de login). Se reintenta una vez en 10 s.');
+    await new Promise(r => setTimeout(r, 10000));
+    return exportarExcelUnaVez(opciones);
   }
 }
 
