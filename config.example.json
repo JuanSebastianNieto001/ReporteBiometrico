@@ -19,7 +19,7 @@
     "sabado": null,
     "domingo": null
   },
-  "turnos": { "margenMinutos": 10 },
+  "turnos": { "margenMinutos": 15 },
   "excepcionesPorFecha": {},
   "correo": {
     "destinatarios": [

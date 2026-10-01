@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const nodemailer = require('nodemailer');
-const { fechaCorreo, segundosAHora, horaASegundos } = require('./fechas');
+const { fechaCorreo, fechaLarga, segundosAHora, horaASegundos } = require('./fechas');
 
 // Asunto a partir de la plantilla de config.json: {fecha} -> 3/09/2026, {hora} -> 9:00.
 // Sin hora (p. ej. el correo de prueba) se quita el tramo " - Entrada {hora}".
@@ -26,6 +26,9 @@ function construirCorreo({ fecha, tardes, config, hora }) {
   const c = config.correo;
   const asunto = asuntoCorreo(c.asunto, fecha, hora);
   const saludo = c.saludo || 'Buen día,\n\nSe envía reporte de biometría.';
+  // Con varios reportes al día, el cuerpo dice de qué fecha y hora de entrada es este.
+  const segHora = horaASegundos(hora);
+  const encabezado = segHora == null ? '' : `Reporte del ${fechaLarga(fecha).toLowerCase()}, hora de entrada ${segundosAHora(segHora, { conSegundos: false, ceroInicial: false })}.`;
   const filas = tardes.map(p => ({ nombre: p.nombre, hora: segundosAHora(p.primeraSeg, { ceroInicial: false }) }));
 
   // Las horas se alinean en columna rellenando el nombre con espacios hasta el mas largo,
@@ -37,7 +40,7 @@ function construirCorreo({ fecha, tardes, config, hora }) {
     ? filas.map(f => `${f.nombre.padEnd(anchoNombre + 2)}${f.hora}`).join('\n')
     : (c.sinLlegadasTarde || 'No se registran llegadas tarde para el día de hoy.');
 
-  const texto = [saludo, '', lineas, c.despedida ? `\n${c.despedida}` : ''].join('\n').trimEnd() + '\n';
+  const texto = [saludo, ...(encabezado ? ['', encabezado] : []), '', lineas, c.despedida ? `\n${c.despedida}` : ''].join('\n').trimEnd() + '\n';
 
   const tabla = filas.length
     ? `<table cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px">
@@ -47,6 +50,7 @@ ${filas.map(f => `  <tr><td style="padding:2px 40px 2px 0">${escaparHtml(f.nombr
 
   const html = `<div style="font-family:Arial,sans-serif;font-size:14px;color:#111">
 ${saludo.split('\n').map(l => (l.trim() ? `<p style="margin:0 0 4px">${escaparHtml(l)}</p>` : '<br>')).join('\n')}
+${encabezado ? `<br>\n<p style="margin:0 0 4px"><b>${escaparHtml(encabezado)}</b></p>` : ''}
 <br>
 ${tabla}
 ${c.despedida ? `<br><p>${escaparHtml(c.despedida)}</p>` : ''}
