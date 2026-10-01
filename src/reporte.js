@@ -77,10 +77,10 @@ function agruparPorPersona(registros, fechaISO) {
 
 // Turno (franja) al que pertenece una persona según su PRIMERA marcación, cuando el día tiene varias
 // horas de entrada. Quien marca en los `margenMin` minutos previos a una hora es de ese turno; quien
-// marca antes es del turno anterior. Con 8:00/9:00/10:00 y 15 min:
-//   hasta 8:44 -> 8:00 (tarde desde 8:00) | 8:45-9:44 -> 9:00 (tarde desde 9:00) | 9:45 en adelante -> 10:00
+// marca antes es del turno anterior. Con 8:00/9:00/10:00 y 10 min:
+//   hasta 8:49 -> 8:00 (tarde desde 8:00) | 8:50-9:49 -> 9:00 (tarde desde 9:00) | 9:50 en adelante -> 10:00
 // Así nadie sale en dos reportes y quien entra a las 9:00 no sale tarde en el de las 8:00.
-// Límite conocido: uno del turno 8:00 que marque a las 8:50 cuenta como del turno 9:00 a tiempo.
+// Límite conocido: uno del turno 8:00 que marque a las 8:55 cuenta como del turno 9:00 a tiempo.
 function turnoDe(primeraSeg, horas, margenMin) {
   let turno = horas[0];
   for (const h of horas.slice(1)) if (primeraSeg >= horaASegundos(h) - margenMin * 60) turno = h;

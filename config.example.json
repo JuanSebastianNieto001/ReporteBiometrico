@@ -13,13 +13,13 @@
   "horarioHabitual": {
     "lunes": ["08:00", "09:00"],
     "martes": ["08:00", "09:00"],
-    "miercoles": ["08:00", "09:00", "10:00"],
+    "miercoles": ["08:00", "09:00"],
     "jueves": ["08:00", "09:00", "10:00"],
     "viernes": ["08:00", "09:00", "10:00"],
     "sabado": null,
     "domingo": null
   },
-  "turnos": { "margenMinutos": 15 },
+  "turnos": { "margenMinutos": 10 },
   "excepcionesPorFecha": {},
   "correo": {
     "destinatarios": [

@@ -39,10 +39,12 @@ function botonRespuesta(cfg, etiqueta, texto) {
  * desdeUnix: solo se consideran mensajes posteriores a ese instante (segundos Unix).
  * Devuelve { texto, evento } o null si se agota el tiempo.
  */
-async function esperarRespuesta(cfg, { desdeUnix, filtro = () => true, timeoutMs, alDescartar, log = () => {} }) {
+async function esperarRespuesta(cfg, { desdeUnix, desdeId, filtro = () => true, timeoutMs, alDescartar, log = () => {} }) {
   validar(cfg);
   const fin = Date.now() + timeoutMs;
-  let since = String(desdeUnix);
+  // desdeId (id del último mensaje ya leído) tiene prioridad: since=<segundos> incluye los mensajes de
+  // ese mismo segundo y volvería a entregar la respuesta ya procesada (bucle del 01/10/2026).
+  let since = desdeId || String(desdeUnix);
   while (Date.now() < fin) {
     const ctrl = new AbortController();
     const restante = fin - Date.now();

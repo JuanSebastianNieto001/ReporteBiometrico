@@ -5,7 +5,7 @@
 # "node src\index.js --hora HH:MM --programada" para esa hora. Ej.:
 #   ReporteBiometrico-0800  08:45  lunes a viernes
 #   ReporteBiometrico-0900  09:45  lunes a viernes
-#   ReporteBiometrico-1000  10:45  miércoles a viernes
+#   ReporteBiometrico-1000  10:45  jueves y viernes
 # Van en tareas separadas (y no en una con varios disparadores) porque una tarea no arranca otra vez
 # mientras sigue corriendo, y el reporte de las 8:00 puede seguir esperando la respuesta de ntfy a las 9:30.
 #

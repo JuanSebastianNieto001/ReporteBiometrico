@@ -249,17 +249,18 @@ async function main() {
     const fin = Date.now() + horasEspera * 3600 * 1000;
     const titulo = `Reporte biométrico ${fechaCorreo(fecha)}${propuesta.hora ? ` (entrada ${propuesta.hora})` : ''}`;
     let desde = Math.floor(Date.now() / 1000) - 2;
+    let desdeId = null;
     let hora = propuesta.hora;
     const resumenCon = (h) => { const t = tardesCon(h); return `${t.length} llegada(s) tarde de ${personas.length} persona(s) con marcación` + (cfgN.incluirNombres && t.length ? ':\n' + textoTardes(t) : ''); };
 
     if (hora) {
       await ntfy.publicar(cfgN, {
         titulo,
-        mensaje: `Reporte con hora de entrada ${hora} del ${nombreDia(fecha)} ${fechaCorreo(fecha)}: ¿se envía?\n${resumenCon(hora)}\n\nToca un botón, o escribe "cancelar".`,
+        mensaje: `¿Confirmas que se envíe el reporte de las ${hora} del ${nombreDia(fecha)} ${fechaCorreo(fecha)}? ¿O hubo otra hora de ingreso?\n${resumenCon(hora)}\n\nToca "Sí" o "No, otra hora" (o escribe "cancelar").`,
         prioridad: 4, etiquetas: ['clipboard'],
         // Los botones llevan la hora ("si 09:00") porque puede haber otro reporte del día esperando
         // respuesta en el mismo tema; así cada uno toma solo la suya.
-        acciones: [ntfy.botonRespuesta(cfgN, `Sí, enviar con ${hora}`, `si ${hora}`), ntfy.botonRespuesta(cfgN, 'No, otra hora', `no ${hora}`)],
+        acciones: [ntfy.botonRespuesta(cfgN, 'Sí', `si ${hora}`), ntfy.botonRespuesta(cfgN, 'No, otra hora', `no ${hora}`)],
       });
       log(`ntfy: pregunta enviada al tema "${cfgN.tema}" con hora propuesta ${hora}. Esperando respuesta hasta ${horasEspera} h...`);
     } else {
@@ -306,6 +307,7 @@ async function main() {
     for (;;) {
       const resp = await ntfy.esperarRespuesta(cfgN, {
         desdeUnix: desde,
+        desdeId,
         timeoutMs: Math.max(1000, fin - Date.now()),
         filtro: aceptada,
         alDescartar: async (t) => {
@@ -323,6 +325,7 @@ async function main() {
       }
       const t = sinEtiqueta(resp.texto);
       desde = resp.evento.time;
+      desdeId = resp.evento.id;
       log(`ntfy: respuesta recibida "${t}"`);
 
       if (esCancelar(t)) {
