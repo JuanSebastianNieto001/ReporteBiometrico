@@ -68,7 +68,13 @@ async function iniciarSesionSiHaceFalta(page, usuario, clave, log, captura) {
     await tileCuenta.click();
     await page.waitForTimeout(3000);
   } else {
-    await email.waitFor({ state: 'visible', timeout: 30000 });
+    // La sesion puede estar restaurandose (redirecciones SetSID de Google): volver a esperar antes de exigir el formulario.
+    const estadoLogin = await esperarBandejaOLogin(page, 30);
+    if (estadoLogin === 'bandeja') { log('  Sesion de Gmail restaurada tras la redireccion de Google.'); return; }
+    if (estadoLogin !== 'login') {
+      await captura('gmail_00b_sin_formulario');
+      throw new Error('Gmail no mostro ni la bandeja ni el formulario de inicio de sesion. URL: ' + page.url());
+    }
     await email.click(); await email.fill(usuario);
     await captura('gmail_01_email');
     await page.getByRole('button', { name: /^Siguiente$|^Next$/ }).first().click();
